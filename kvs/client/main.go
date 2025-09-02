@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"flag"
 	"fmt"
 	"log"
@@ -61,7 +62,8 @@ func runClient(id int, addr string, done *atomic.Bool, workload *kvs.Workload, r
 	for !done.Load() {
 		for j := 0; j < batchSize; j++ {
 			op := workload.Next()
-			key := fmt.Sprintf("%d", op.Key)
+			//key := fmt.Sprintf("%d", op.Key)
+			key := strconv.FormatUint(op.Key,10)
 			if op.IsRead {
 				client.Get(key)
 			} else {
@@ -93,6 +95,9 @@ func main() {
 	flag.Var(&hosts, "hosts", "Comma-separated list of host:ports to connect to")
 	theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
 	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C)")
+	//addition
+	host_generators := flag.Int("host_generators", 2 , "generators per host")
+
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
 	flag.Parse()
 
@@ -111,19 +116,50 @@ func main() {
 	start := time.Now()
 
 	done := atomic.Bool{}
-	resultsCh := make(chan uint64)
-
+	//resultsCh := make(chan uint64)
+	resultsCh := make(chan uint64, len(hosts)*(*host_generators))
+/*
 	host := hosts[0]
 	clientId := 0
 	go func(clientId int) {
 		workload := kvs.NewWorkload(*workload, *theta)
 		runClient(clientId, host, &done, workload, resultsCh)
 	}(clientId)
+*/
+/*
+	for i, host := range hosts {
+		clientId := i
+		go func(host string , clientId int) {
+			workload := kvs.NewWorkload(*workload , *theta)
+			runClient(clientId, host, &done, workload, resultsCh)
+		}(host, clientId)
+	}
+*/
+
+	for i, host := range hosts {
+		for g := 0; g < *host_generators; g++ {
+			clientId := i*(*host_generators)+g
+			go func(host string, clientId int){
+				work_load := kvs.NewWorkload(*workload,*theta)
+				runClient(clientId, host, &done, work_load, resultsCh)
+			}(host, clientId)
+		}
+	}
 
 	time.Sleep(time.Duration(*secs) * time.Second)
 	done.Store(true)
 
-	opsCompleted := <-resultsCh
+	//opsCompleted := <-resultsCh
+	/*
+	var opsCompleted uint64
+	for range hosts {
+		opsCompleted += <- resultsCh
+	}
+*/
+	var opsCompleted uint64
+	for i :=0; i<len(hosts)*(*host_generators); i++{
+		opsCompleted += <-resultsCh
+	}
 
 	elapsed := time.Since(start)
 
