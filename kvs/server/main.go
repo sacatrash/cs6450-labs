@@ -21,8 +21,8 @@ type Stats struct {
 
 func (s *Stats) Sub(prev *Stats) Stats {
 	r := Stats{}
-	r.puts = s.puts.Load() - prev.puts.Load()
-	r.gets = s.gets.Load() - prev.gets.Load()
+	r.puts.Store(s.puts.Load() - prev.puts.Load())
+	r.gets.Store(s.gets.Load() - prev.gets.Load())
 	return r
 }
 
