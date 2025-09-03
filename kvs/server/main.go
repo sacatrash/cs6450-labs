@@ -26,9 +26,12 @@ func (s *Stats) Sub(prev *Stats) Stats {
 	return r
 }
 
+//use the KVService mutex when we need to add/remove keys
+//use the mutexMap mutex for getting/setting existing keys
 type KVService struct {
 	sync.Mutex
 	mp        map[string]string
+	mutexMap map[string]sync.Mutex
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
@@ -37,15 +40,22 @@ type KVService struct {
 func NewKVService() *KVService {
 	kvs := &KVService{}
 	kvs.mp = make(map[string]string)
+	kvs.mutexMap = make(map[string]sync.Mutex)
 	kvs.lastPrint = time.Now()
 	return kvs
 }
 
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
-	kv.Lock()
-	defer kv.Unlock()
-
+	vlk, ok := kv.mutexMap[request.Key]
 	kv.stats.gets.Add(1)
+	if ok {
+		vlk.Lock()
+		defer vlk.Unlock()
+	}
+
+	else {
+		return nil
+	}
 
 	if value, found := kv.mp[request.Key]; found {
 		response.Value = value
@@ -55,10 +65,18 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 }
 
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
-	kv.Lock()
-	defer kv.Unlock()
-
+	vlk, ok := kv.mutexMap[request.Key]
 	kv.stats.puts.Add(1)
+	if ok {
+		vlk.Lock()
+		defer vlk.Unlock()
+	}
+	else {
+		kv.Lock()
+		defer kv.Unlock()
+
+		kv.mutexMap[request.key] = make(sync.Mutex)
+	}
 
 	kv.mp[request.Key] = request.Value
 
