@@ -51,9 +51,7 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	if ok {
 		vlk.Lock()
 		defer vlk.Unlock()
-	}
-
-	else {
+	} else {
 		return nil
 	}
 
@@ -70,8 +68,7 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 	if ok {
 		vlk.Lock()
 		defer vlk.Unlock()
-	}
-	else {
+	} else {
 		kv.Lock()
 		defer kv.Unlock()
 
