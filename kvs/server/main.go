@@ -72,7 +72,7 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 		kv.Lock()
 		defer kv.Unlock()
 
-		kv.mutexMap[request.key] = sync.Mutex{}
+		kv.mutexMap[request.Key] = sync.Mutex{}
 	}
 
 	kv.mp[request.Key] = request.Value
