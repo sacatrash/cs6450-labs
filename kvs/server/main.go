@@ -21,8 +21,8 @@ type Stats struct {
 
 func (s *Stats) Sub(prev *Stats) Stats {
 	r := Stats{}
-	r.puts = s.puts - prev.puts
-	r.gets = s.gets - prev.gets
+	r.puts = s.puts.Load() - prev.puts.Load()
+	r.gets = s.gets.Load() - prev.gets.Load()
 	return r
 }
 
@@ -45,7 +45,7 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	kv.Lock()
 	defer kv.Unlock()
 
-	kv.stats.gets++
+	kv.stats.gets.Add(1)
 
 	if value, found := kv.mp[request.Key]; found {
 		response.Value = value
@@ -58,7 +58,7 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 	kv.Lock()
 	defer kv.Unlock()
 
-	kv.stats.puts++
+	kv.stats.puts.Add(1)
 
 	kv.mp[request.Key] = request.Value
 
@@ -79,10 +79,13 @@ func (kv *KVService) printStats() {
 	diff := stats.Sub(&prevStats)
 	deltaS := now.Sub(lastPrint).Seconds()
 
+	gets := diff.gets.Load()
+	puts := diff.puts.Load()
+
 	fmt.Printf("get/s %0.2f\nput/s %0.2f\nops/s %0.2f\n\n",
-		float64(diff.gets)/deltaS,
-		float64(diff.puts)/deltaS,
-		float64(diff.gets+diff.puts)/deltaS)
+		float64(gets)/deltaS,
+		float64(puts)/deltaS,
+		float64(gets+puts)/deltaS)
 }
 
 func main() {
