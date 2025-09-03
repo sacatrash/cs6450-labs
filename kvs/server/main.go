@@ -9,13 +9,14 @@ import (
 	"net/rpc"
 	"sync"
 	"time"
+	"sync/atomic"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
 type Stats struct {
-	puts uint64
-	gets uint64
+	puts atomic.Uint64
+	gets atomic.Uint64
 }
 
 func (s *Stats) Sub(prev *Stats) Stats {
@@ -65,14 +66,15 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 }
 
 func (kv *KVService) printStats() {
-	kv.Lock()
+	//kv.Lock()
+	//locks no longer needed as we're using atomics for it now
 	stats := kv.stats
 	prevStats := kv.prevStats
 	kv.prevStats = stats
 	now := time.Now()
 	lastPrint := kv.lastPrint
 	kv.lastPrint = now
-	kv.Unlock()
+	//kv.Unlock()
 
 	diff := stats.Sub(&prevStats)
 	deltaS := now.Sub(lastPrint).Seconds()
