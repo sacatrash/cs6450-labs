@@ -1,6 +1,7 @@
 package main
 
 import (
+	//"hash/fnv"
 	"flag"
 	"fmt"
 	"log"
@@ -17,6 +18,24 @@ import (
 type Stats struct {
 	puts atomic.Uint64
 	gets atomic.Uint64
+}
+
+func (kv *KVService) Batch(request *kvs.RequestBatch , response *kvs.ResponseBatch) error {
+	response.Values = make([]string, len(request.Ops))
+	kv.Lock()
+	defer kv.Unlock()
+
+	for i , op := range request.Ops {
+		if op.IsRead {
+			if v, ok := kv.mp[op.Key]; ok {response.Values[i]=v}
+			kv.stats.gets++
+
+		} else{
+			kv.mp[op.Key] = op.Value
+			kv.stats.puts++
+		}
+	}
+	return nil
 }
 
 func (s *Stats) Sub(prev *Stats) Stats {

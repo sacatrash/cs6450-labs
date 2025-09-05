@@ -51,26 +51,59 @@ func (client *Client) Put(key string, value string) {
 	}
 }
 
+func (client *Client) Batch(ops []kvs.Op)[]string{
+	request, response := kvs.RequestBatch{Ops: ops}, kvs.ResponseBatch{}
+	if err := client.rpcClient.Call("KVService.Batch", &request, &response); err != nil { log.Fatal(err)}
+	return response.Values
+}
+
 func runClient(id int, addr string, done *atomic.Bool, workload *kvs.Workload, resultsCh chan<- uint64) {
 	client := Dial(addr)
 
 	value := strings.Repeat("x", 128)
 	const batchSize = 1024
+	const ttlFlush = time.Millisecond
+	batch := make([]kvs.Op, 0, 64)
+	deadline := time.Now().Add(ttlFlush)
 
 	opsCompleted := uint64(0)
+
+	flushBatch := func(){
+		results := client.Batch(batch)
+		opsCompleted += uint64(len(results))
+		batch = batch[:0]
+		deadline = time.Now().Add(ttlFlush)
+	}
 
 	for !done.Load() {
 		for j := 0; j < batchSize; j++ {
 			op := workload.Next()
 			//key := fmt.Sprintf("%d", op.Key)
 			key := strconv.FormatUint(op.Key,10)
+			/*
 			if op.IsRead {
 				client.Get(key)
 			} else {
 				client.Put(key, value)
 			}
 			opsCompleted++
+			*/
+			if op.IsRead{
+				batch = append(batch,kvs.Op{IsRead: true, Key: key})
+
+			}else{
+				batch = append (batch, kvs.Op{IsRead: false, Key: key, Value: value})
+
+			}
+			
+			if len(batch)>= cap(batch) || time.Now().After(deadline){
+				flushBatch()
+			}
+			if done.Load() {break}
 		}
+	}
+	if len(batch) > 0{
+		flushBatch()
 	}
 
 	fmt.Printf("Client %d finished operations.\n", id)
