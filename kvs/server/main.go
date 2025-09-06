@@ -127,6 +127,10 @@ func (kv *KVService) printStats() {
 		float64(gets+puts)/deltaS)
 }
 
+func (kv *KVService) processQueue() {
+	kv.q.process()
+}
+
 func main() {
 	port := flag.String("port", "8080", "Port to run the server on")
 	flag.Parse()
@@ -144,6 +148,7 @@ func main() {
 
 	go func() {
 		for {
+			kvs.processQueue()
 			kvs.printStats()
 			time.Sleep(1 * time.Second)
 		}
