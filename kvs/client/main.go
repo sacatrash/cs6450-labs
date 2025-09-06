@@ -29,9 +29,8 @@ func Dial(addr string) *Client {
 }
 
 func (client *Client) Get(key string) string {
-	request := kvs.GetRequest{
-		Key: key,
-	}
+	request := kvs.GetRequest{}
+	request.Request.Key = key
 	response := kvs.GetResponse{}
 	err := client.rpcClient.Call("KVService.Get", &request, &response)
 	if err != nil {

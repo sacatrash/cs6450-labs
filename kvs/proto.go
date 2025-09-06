@@ -12,6 +12,7 @@ type Response struct{}
 //inherited classes
 type PutRequest struct {
 	Request
+	Key   string
 	Value string
 }
 
