@@ -49,6 +49,7 @@ func (s *Stats) Sub(prev *Stats) Stats {
 //use the mutexMap mutex for getting/setting existing keys
 type KVService struct {
 	sync.Mutex
+	MasterQueue q
 	mp        map[string]string
 	mutexMap map[string]sync.Mutex
 	stats     Stats
@@ -61,30 +62,32 @@ func NewKVService() *KVService {
 	kvs.mp = make(map[string]string)
 	kvs.mutexMap = make(map[string]sync.Mutex)
 	kvs.lastPrint = time.Now()
+	kvs.MasterQueue.initialize()
 	return kvs
 }
 
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
 	vlk, ok := kv.mutexMap[request.Key]
 	kv.stats.gets.Add(1)
-	if ok {
+	kv.Lock()
+	defer kv.Unlock()
+	/*if ok {
 		vlk.Lock()
 		defer vlk.Unlock()
 	} else {
 		return nil
-	}
+	}*/
 
 	if value, found := kv.mp[request.Key]; found {
 		response.Value = value
 	}
-
 	return nil
 }
 
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
 	vlk, ok := kv.mutexMap[request.Key]
 	kv.stats.puts.Add(1)
-	if ok {
+	/*if ok {
 		vlk.Lock()
 		defer vlk.Unlock()
 	} else {
@@ -92,7 +95,9 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 		defer kv.Unlock()
 
 		kv.mutexMap[request.Key] = sync.Mutex{}
-	}
+	}*/
+	kv.Lock()
+	defer kv.Unlock()
 
 	kv.mp[request.Key] = request.Value
 

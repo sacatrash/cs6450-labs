@@ -1,17 +1,27 @@
 package kvs
 
+//parent classes
+type Request struct {
+	Key string
+}
+
+type Response struct { }
+
+//inherited classes
 type PutRequest struct {
-	Key   string
+	Request
 	Value string
 }
 
 type PutResponse struct {
+	Response
 }
 
 type GetRequest struct {
-	Key string
+	Request
 }
 
 type GetResponse struct {
+	Response
 	Value string
 }
