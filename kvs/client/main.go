@@ -1,20 +1,22 @@
 package main
 
 import (
-	"strconv"
 	"flag"
 	"fmt"
 	"log"
 	"net/rpc"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
 type Client struct {
 	rpcClient *rpc.Client
+	Name      string
 }
 
 func Dial(addr string) *Client {
@@ -23,7 +25,7 @@ func Dial(addr string) *Client {
 		log.Fatal(err)
 	}
 
-	return &Client{rpcClient}
+	return &Client{rpcClient, uuid.New().String()}
 }
 
 func (client *Client) Get(key string) string {
@@ -51,9 +53,11 @@ func (client *Client) Put(key string, value string) {
 	}
 }
 
-func (client *Client) Batch(ops []kvs.Op)[]string{
-	request, response := kvs.RequestBatch{Ops: ops}, kvs.ResponseBatch{}
-	if err := client.rpcClient.Call("KVService.Batch", &request, &response); err != nil { log.Fatal(err)}
+func (client *Client) Batch(ops []kvs.Op) []string {
+	request, response := kvs.RequestBatch{Ops: ops, Name: client.Name}, kvs.ResponseBatch{}
+	if err := client.rpcClient.Call("KVService.Batch", &request, &response); err != nil {
+		log.Fatal(err)
+	}
 	return response.Values
 }
 
@@ -68,7 +72,7 @@ func runClient(id int, addr string, done *atomic.Bool, workload *kvs.Workload, r
 
 	opsCompleted := uint64(0)
 
-	flushBatch := func(){
+	flushBatch := func() {
 		results := client.Batch(batch)
 		opsCompleted += uint64(len(results))
 		batch = batch[:0]
@@ -79,30 +83,32 @@ func runClient(id int, addr string, done *atomic.Bool, workload *kvs.Workload, r
 		for j := 0; j < batchSize; j++ {
 			op := workload.Next()
 			//key := fmt.Sprintf("%d", op.Key)
-			key := strconv.FormatUint(op.Key,10)
+			key := strconv.FormatUint(op.Key, 10)
 			/*
-			if op.IsRead {
-				client.Get(key)
-			} else {
-				client.Put(key, value)
-			}
-			opsCompleted++
+				if op.IsRead {
+					client.Get(key)
+				} else {
+					client.Put(key, value)
+				}
+				opsCompleted++
 			*/
-			if op.IsRead{
-				batch = append(batch,kvs.Op{IsRead: true, Key: key})
+			if op.IsRead {
+				batch = append(batch, kvs.Op{IsRead: true, Key: key})
 
-			}else{
-				batch = append (batch, kvs.Op{IsRead: false, Key: key, Value: value})
+			} else {
+				batch = append(batch, kvs.Op{IsRead: false, Key: key, Value: value})
 
 			}
-			
-			if len(batch)>= cap(batch) || time.Now().After(deadline){
+
+			if len(batch) >= cap(batch) || time.Now().After(deadline) {
 				flushBatch()
 			}
-			if done.Load() {break}
+			if done.Load() {
+				break
+			}
 		}
 	}
-	if len(batch) > 0{
+	if len(batch) > 0 {
 		flushBatch()
 	}
 
@@ -129,7 +135,7 @@ func main() {
 	theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
 	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C)")
 	//addition
-	host_generators := flag.Int("host_generators", 2 , "generators per host")
+	host_generators := flag.Int("host_generators", 2, "generators per host")
 
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
 	flag.Parse()
@@ -151,29 +157,29 @@ func main() {
 	done := atomic.Bool{}
 	//resultsCh := make(chan uint64)
 	resultsCh := make(chan uint64, len(hosts)*(*host_generators))
-/*
-	host := hosts[0]
-	clientId := 0
-	go func(clientId int) {
-		workload := kvs.NewWorkload(*workload, *theta)
-		runClient(clientId, host, &done, workload, resultsCh)
-	}(clientId)
-*/
-/*
-	for i, host := range hosts {
-		clientId := i
-		go func(host string , clientId int) {
-			workload := kvs.NewWorkload(*workload , *theta)
+	/*
+		host := hosts[0]
+		clientId := 0
+		go func(clientId int) {
+			workload := kvs.NewWorkload(*workload, *theta)
 			runClient(clientId, host, &done, workload, resultsCh)
-		}(host, clientId)
-	}
-*/
+		}(clientId)
+	*/
+	/*
+		for i, host := range hosts {
+			clientId := i
+			go func(host string , clientId int) {
+				workload := kvs.NewWorkload(*workload , *theta)
+				runClient(clientId, host, &done, workload, resultsCh)
+			}(host, clientId)
+		}
+	*/
 
 	for i, host := range hosts {
 		for g := 0; g < *host_generators; g++ {
-			clientId := i*(*host_generators)+g
-			go func(host string, clientId int){
-				work_load := kvs.NewWorkload(*workload,*theta)
+			clientId := i*(*host_generators) + g
+			go func(host string, clientId int) {
+				work_load := kvs.NewWorkload(*workload, *theta)
 				runClient(clientId, host, &done, work_load, resultsCh)
 			}(host, clientId)
 		}
@@ -184,13 +190,13 @@ func main() {
 
 	//opsCompleted := <-resultsCh
 	/*
+		var opsCompleted uint64
+		for range hosts {
+			opsCompleted += <- resultsCh
+		}
+	*/
 	var opsCompleted uint64
-	for range hosts {
-		opsCompleted += <- resultsCh
-	}
-*/
-	var opsCompleted uint64
-	for i :=0; i<len(hosts)*(*host_generators); i++{
+	for i := 0; i < len(hosts)*(*host_generators); i++ {
 		opsCompleted += <-resultsCh
 	}
 

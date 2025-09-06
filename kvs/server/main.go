@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"net/rpc"
 	"sync"
-	"time"
 	"sync/atomic"
+	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
@@ -20,22 +20,27 @@ type Stats struct {
 	gets atomic.Uint64
 }
 
-func (kv *KVService) Batch(request *kvs.RequestBatch , response *kvs.ResponseBatch) error {
+func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatch) error {
 	response.Values = make([]string, len(request.Ops))
-	kv.Lock()
-	defer kv.Unlock()
 
-	for i , op := range request.Ops {
+	name := request.Name
+	if _, ok := kv.q.Node2queue[name]; !ok {
+		kv.Lock()
+		kv.q.AddNewQueue(name)
+		kv.Unlock()
+	}
+
+	res := <-*kv.q.Node2queue[name].AddTask(request, response)
+
+	for _, op := range request.Ops {
 		if op.IsRead {
-			if v, ok := kv.mp[op.Key]; ok {response.Values[i]=v}
-			kv.stats.gets++
+			kv.stats.gets.Add(1)
 
-		} else{
-			kv.mp[op.Key] = op.Value
-			kv.stats.puts++
+		} else {
+			kv.stats.puts.Add(1)
 		}
 	}
-	return nil
+	return res
 }
 
 func (s *Stats) Sub(prev *Stats) Stats {
@@ -45,13 +50,13 @@ func (s *Stats) Sub(prev *Stats) Stats {
 	return r
 }
 
-//use the KVService mutex when we need to add/remove keys
-//use the mutexMap mutex for getting/setting existing keys
+// use the KVService mutex when we need to add/remove keys
+// use the mutexMap mutex for getting/setting existing keys
 type KVService struct {
 	sync.Mutex
-	MasterQueue q
+	q         kvs.MasterQueue
 	mp        map[string]string
-	mutexMap map[string]sync.Mutex
+	mutexMap  map[string]sync.Mutex
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
@@ -62,12 +67,12 @@ func NewKVService() *KVService {
 	kvs.mp = make(map[string]string)
 	kvs.mutexMap = make(map[string]sync.Mutex)
 	kvs.lastPrint = time.Now()
-	kvs.MasterQueue.initialize()
+	kvs.q.Initialize(&kvs.Mutex, &kvs.mp)
 	return kvs
 }
 
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
-	vlk, ok := kv.mutexMap[request.Key]
+	//vlk, ok := kv.mutexMap[request.Key]
 	kv.stats.gets.Add(1)
 	kv.Lock()
 	defer kv.Unlock()
@@ -85,7 +90,7 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 }
 
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
-	vlk, ok := kv.mutexMap[request.Key]
+	//vlk, ok := kv.mutexMap[request.Key]
 	kv.stats.puts.Add(1)
 	/*if ok {
 		vlk.Lock()
@@ -128,7 +133,7 @@ func (kv *KVService) printStats() {
 }
 
 func (kv *KVService) processQueue() {
-	kv.q.process()
+	kv.q.Process()
 }
 
 func main() {
@@ -136,6 +141,7 @@ func main() {
 	flag.Parse()
 
 	kvs := NewKVService()
+
 	rpc.Register(kvs)
 	rpc.HandleHTTP()
 
