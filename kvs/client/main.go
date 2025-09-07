@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	_ "net/http/pprof"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -76,7 +77,7 @@ func runClient(id int, addr string, done *atomic.Bool, workload *kvs.Workload, r
 	value := strings.Repeat("x", 128)
 	const batchSize = 1024
 	const ttlFlush = time.Millisecond
-	batch := make([]*pb.Ops, 0, 64)
+	batch := make([]*pb.Ops, 0, 2048)
 	deadline := time.Now().Add(ttlFlush)
 
 	opsCompleted := uint64(0)
@@ -140,6 +141,9 @@ func (h *HostList) Set(value string) error {
 }
 
 func main() {
+	go func() {
+		//log.Println(http.ListenAndServe("localhost:6061", nil))
+	}()
 	hosts := HostList{}
 
 	flag.Var(&hosts, "hosts", "Comma-separated list of host:ports to connect to")
