@@ -8,30 +8,37 @@ import (
 	"net/http"
 	"net/rpc"
 	"sync"
-	"time"
 	"sync/atomic"
+	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
 type Stats struct {
-	puts atomic.Uint64
-	gets atomic.Uint64
+	puts *atomic.Uint64
+	gets *atomic.Uint64
+}
+
+func (s *Stats) Init() {
+	s.puts = new(atomic.Uint64)
+	s.gets = new(atomic.Uint64)
 }
 
 func (s *Stats) Sub(prev *Stats) Stats {
 	r := Stats{}
+	r.puts = new(atomic.Uint64)
+	r.gets = new(atomic.Uint64)
 	r.puts.Store(s.puts.Load() - prev.puts.Load())
 	r.gets.Store(s.gets.Load() - prev.gets.Load())
 	return r
 }
 
-//use the KVService mutex when we need to add/remove keys
-//use the mutexMap mutex for getting/setting existing keys
+// use the KVService mutex when we need to add/remove keys
+// use the mutexMap mutex for getting/setting existing keys
 type KVService struct {
 	sync.Mutex
-	mp        map[string]string
-	mutexMap map[string]sync.Mutex
+	//mp        map[string]*atomic.Value
+	mp        sync.Map
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
@@ -39,43 +46,36 @@ type KVService struct {
 
 func NewKVService() *KVService {
 	kvs := &KVService{}
-	kvs.mp = make(map[string]string)
-	kvs.mutexMap = make(map[string]sync.Mutex)
+	//kvs.mp = make(map[string]*atomic.Value)
+	kvs.mp = sync.Map{}
 	kvs.lastPrint = time.Now()
+	kvs.stats.Init()
+	kvs.prevStats.Init()
 	return kvs
 }
 
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
-	vlk, ok := kv.mutexMap[request.Key]
 	kv.stats.gets.Add(1)
+	/*vlk, ok := kv.mutexMap[request.Key]
+
 	if ok {
 		vlk.Lock()
 		defer vlk.Unlock()
 	} else {
 		return nil
-	}
+	}*/
 
-	if value, found := kv.mp[request.Key]; found {
-		response.Value = value
+	if value, found := kv.mp.Load(request.Key); found {
+		response.Value = value.(string)
 	}
 
 	return nil
 }
 
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
-	vlk, ok := kv.mutexMap[request.Key]
 	kv.stats.puts.Add(1)
-	if ok {
-		vlk.Lock()
-		defer vlk.Unlock()
-	} else {
-		kv.Lock()
-		defer kv.Unlock()
 
-		kv.mutexMap[request.Key] = sync.Mutex{}
-	}
-
-	kv.mp[request.Key] = request.Value
+	kv.mp.Store(request.Key, request.Value)
 
 	return nil
 }
@@ -85,7 +85,10 @@ func (kv *KVService) printStats() {
 	//locks no longer needed as we're using atomics for it now
 	stats := kv.stats
 	prevStats := kv.prevStats
-	kv.prevStats = stats
+	kv.prevStats = Stats{}
+	kv.prevStats.Init()
+	kv.prevStats.gets.Store(stats.gets.Load())
+	kv.prevStats.puts.Store(stats.puts.Load())
 	now := time.Now()
 	lastPrint := kv.lastPrint
 	kv.lastPrint = now
