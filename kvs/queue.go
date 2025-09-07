@@ -59,7 +59,7 @@ func (m *MasterQueue) Initialize(lock *sync.Mutex, target *map[string]string) {
 	m.format = "RoundRobin"
 	m.TargetMap = target
 	m.locker = lock
-	m.MaxElements = 10
+	m.MaxElements = 100
 
 }
 
