@@ -25,19 +25,21 @@ func (s *Stats) Init() {
 	s.gets = new(atomic.Uint64)
 }
 
-func (kv *KVService) Batch(request *kvs.RequestBatch , response *kvs.ResponseBatch) error {
+func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatch) error {
 	response.Values = make([]string, len(request.Ops))
-	kv.Lock()
-	defer kv.Unlock()
+	//kv.Lock()
+	//defer kv.Unlock()
 
-	for i , op := range request.Ops {
+	for i, op := range request.Ops {
 		if op.IsRead {
-			if v, ok := kv.mp[op.Key]; ok {response.Values[i]=v}
-			kv.stats.gets++
+			if v, ok := kv.mp.Load(op.Key); ok {
+				response.Values[i] = v.(string)
+			}
+			kv.stats.gets.Add(1)
 
-		} else{
-			kv.mp[op.Key] = op.Value
-			kv.stats.puts++
+		} else {
+			kv.mp.Store(op.Key, op.Value)
+			kv.stats.puts.Add(1)
 		}
 	}
 	return nil
