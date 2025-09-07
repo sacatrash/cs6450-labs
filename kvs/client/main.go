@@ -75,9 +75,9 @@ func runClient(id int, addr string, done *atomic.Bool, workload *kvs.Workload, r
 	client := pb.NewKVServiceClient(rpcClient)
 
 	value := strings.Repeat("x", 128)
-	const batchSize = 1024
+	const batchSize = 8192
 	const ttlFlush = time.Millisecond
-	batch := make([]*pb.Ops, 0, 4096)
+	batch := make([]*pb.Ops, 0, 8192)
 	deadline := time.Now().Add(ttlFlush)
 
 	opsCompleted := uint64(0)
