@@ -77,7 +77,7 @@ func runClient(id int, addr string, done *atomic.Bool, workload *kvs.Workload, r
 	value := strings.Repeat("x", 128)
 	const batchSize = 1024
 	const ttlFlush = time.Millisecond
-	batch := make([]*pb.Ops, 0, 2048)
+	batch := make([]*pb.Ops, 0, 4096)
 	deadline := time.Now().Add(ttlFlush)
 
 	opsCompleted := uint64(0)
