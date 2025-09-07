@@ -30,7 +30,7 @@ func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatc
 		kv.Unlock()
 	}
 
-	res := <-*kv.q.Node2queue[name].AddTask(request, response)
+	res := <-*kv.q.Node2queue[name].AddTask(request, response, &kv.Mutex)
 
 	for _, op := range request.Ops {
 		if op.IsRead {
@@ -155,6 +155,11 @@ func main() {
 	go func() {
 		for {
 			kvs.processQueue()
+		}
+	}()
+
+	go func() {
+		for {
 			kvs.printStats()
 			time.Sleep(1 * time.Second)
 		}

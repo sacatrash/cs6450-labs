@@ -11,7 +11,9 @@ type Queue struct {
 	name      string
 }
 
-func (n *Queue) AddTask(request *RequestBatch, response *ResponseBatch) *chan error {
+func (n *Queue) AddTask(request *RequestBatch, response *ResponseBatch, lock *sync.Mutex) *chan error {
+	lock.Lock()
+	defer lock.Unlock()
 	tmp := make(chan error)
 	n.channels = append(n.channels, tmp)
 	n.requests = append(n.requests, request)
