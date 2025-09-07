@@ -1,23 +1,31 @@
 package kvs
 
-import "sync"
+import (
+	"container/list"
+	"sync"
+)
 
-//queue corresponding to a node
-type Queue struct {
-	requests  []*RequestBatch
-	responses []*ResponseBatch
-	channels  []chan error
-	nextNode  *Queue
-	name      string
+type Task struct {
+	channels  chan error
+	requests  *RequestBatch
+	responses *ResponseBatch
 }
 
-func (n *Queue) AddTask(request *RequestBatch, response *ResponseBatch, lock *sync.Mutex) *chan error {
-	lock.Lock()
-	defer lock.Unlock()
+// queue corresponding to a node
+type Queue struct {
+	sync.Mutex
+	tasks    *list.List
+	nextNode *Queue
+	name     string
+}
+
+func (n *Queue) AddTask(request *RequestBatch, response *ResponseBatch) *chan error {
 	tmp := make(chan error)
-	n.channels = append(n.channels, tmp)
-	n.requests = append(n.requests, request)
-	n.responses = append(n.responses, response)
+	tsk := Task{}
+	tsk.channels = tmp
+	tsk.requests = request
+	tsk.responses = response
+	n.tasks.PushBack(tsk)
 	return &tmp
 }
 
@@ -29,6 +37,8 @@ func (n *Queue) next() *Queue {
 }
 
 func (n *Queue) addNew(name string) *Queue {
+	n.Lock()
+	defer n.Unlock()
 	tmp := new(Queue)
 	tmp.name = name
 	tmpNext := n.nextNode
@@ -40,31 +50,34 @@ func (n *Queue) addNew(name string) *Queue {
 	return tmp
 }
 
-//masterQueue manages all queues under it.
-//One queue per node.
-//Rotate the actively processed node depending on a priority
-//similar to a process scheduler (but I forgot the actual name)
+// masterQueue manages all queues under it.
+// One queue per node.
+// Rotate the actively processed node depending on a priority
+// similar to a process scheduler (but I forgot the actual name)
 type MasterQueue struct {
+	sync.Mutex
 	Node2queue  map[string]*Queue
 	format      string
 	nodeList    []string
-	locker      *sync.Mutex
 	currentNode *Queue
-	TargetMap   *map[string]string
+	TargetMap   *map[string]*Content
 	MaxElements int
+	lockList    *list.List
 }
 
-func (m *MasterQueue) Initialize(lock *sync.Mutex, target *map[string]string) {
+func (m *MasterQueue) Initialize(lockList *list.List, target *map[string]*Content) {
+	m.Lock()
+	defer m.Unlock()
 	m.Node2queue = make(map[string]*Queue)
 	m.format = "RoundRobin"
 	m.TargetMap = target
-	m.locker = lock
-	m.MaxElements = 100
-
+	m.MaxElements = 10
+	m.lockList = lockList
 }
 
 func (m *MasterQueue) AddNewQueue(name string) *Queue {
-
+	m.Lock()
+	defer m.Unlock()
 	if len(m.nodeList) > 0 {
 		m.Node2queue[name] = m.Node2queue[m.nodeList[len(m.nodeList)-1]].addNew(name)
 	} else {
@@ -76,6 +89,7 @@ func (m *MasterQueue) AddNewQueue(name string) *Queue {
 }
 
 func (m *MasterQueue) Process() {
+	m.Lock()
 	if m.currentNode == nil {
 		if len(m.nodeList) > 0 {
 			m.currentNode = m.Node2queue[m.nodeList[0]]
@@ -85,33 +99,61 @@ func (m *MasterQueue) Process() {
 	} else {
 		m.currentNode = m.currentNode.next()
 	}
+	nodeProc := m.currentNode
+	m.Unlock()
 
-	if m.currentNode != nil {
-		m.locker.Lock()
-		defer m.locker.Unlock()
-		m.currentNode.process(m.MaxElements, m.TargetMap)
+	if nodeProc != nil {
+		nodeProc.process(m.MaxElements, m.TargetMap, &m.Mutex, m.lockList)
 	}
 }
 
-//processes elements in the queue, and updates priorities
-func (q *Queue) process(maxElements int, mp *map[string]string) {
-	for i := 0; i < maxElements && len(q.channels) > 0; i++ {
-		req := q.requests[0]
-		q.requests = q.requests[1:]
-		ch := q.channels[0]
-		q.channels = q.channels[1:]
-		res := q.responses[0]
-		q.responses = q.responses[1:]
-		for i, op := range req.Ops {
+// processes elements in the queue, and updates priorities
+func (q *Queue) process(maxElements int, mp *map[string]*Content, writeMtx *sync.Mutex, lockMtx *sync.Mutex) {
+
+	for i := 0; i < maxElements && q.tasks.Front() != nil; i++ {
+		q.Lock()
+		tsk := q.tasks.Remove(q.tasks.Front()).(Task)
+		q.Unlock()
+		req := tsk.requests
+		ch := tsk.channels
+		res := tsk.responses
+		//first let's get a slice of all locks we want
+		var l LockRequest
+		l.ret = make(chan int)
+		for _, op := range req.Ops {
+			if v, ok := (*mp)[op.Key]; ok {
+				l.locks = append(l.locks, &v.Mutex)
+			} else if !op.IsRead {
+				l.locks = append(l.locks, writeMtx)
+			}
+		}
+
+		//next, grab all the locks we need:
+		//queue our locks list to a master queue,
+		//then receive a channel callback when we can
+		//grab the locks
+
+		lockMtx.Lock()
+		for k := 0; k < len(l.locks); k++ {
+			l.locks[k].Lock()
+		}
+		lockMtx.Unlock()
+
+		for j, op := range req.Ops {
 			if op.IsRead {
 				if v, ok := (*mp)[op.Key]; ok {
-					res.Values[i] = v
+					res.Values[j] = v.Value
 				}
 
 			} else {
-				(*mp)[op.Key] = op.Value
+				(*mp)[op.Key] = Content{}
 			}
 		}
 		ch <- nil
+		close(ch)
+		for k := 0; k < len(l.locks); k++ {
+			l.locks[k].Unlock()
+		}
 	}
+
 }

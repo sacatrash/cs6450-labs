@@ -2,6 +2,7 @@ package main
 
 import (
 	//"hash/fnv"
+	"container/list"
 	"flag"
 	"fmt"
 	"log"
@@ -16,8 +17,8 @@ import (
 )
 
 type Stats struct {
-	puts atomic.Uint64
-	gets atomic.Uint64
+	puts *atomic.Uint64
+	gets *atomic.Uint64
 }
 
 func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatch) error {
@@ -30,7 +31,7 @@ func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatc
 		kv.Unlock()
 	}
 
-	res := <-*kv.q.Node2queue[name].AddTask(request, response, &kv.Mutex)
+	res := <-*kv.q.Node2queue[name].AddTask(request, response)
 
 	for _, op := range request.Ops {
 		if op.IsRead {
@@ -55,8 +56,8 @@ func (s *Stats) Sub(prev *Stats) Stats {
 type KVService struct {
 	sync.Mutex
 	q         kvs.MasterQueue
-	mp        map[string]string
-	mutexMap  map[string]sync.Mutex
+	mp        map[string]*kvs.Content
+	lockList  list.List
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
@@ -64,10 +65,11 @@ type KVService struct {
 
 func NewKVService() *KVService {
 	kvs := &KVService{}
-	kvs.mp = make(map[string]string)
-	kvs.mutexMap = make(map[string]sync.Mutex)
+	//kvs.mp = make(map[string]*kvs.Content)
 	kvs.lastPrint = time.Now()
-	kvs.q.Initialize(&kvs.Mutex, &kvs.mp)
+	kvs.stats.gets = new(atomic.Uint64)
+	kvs.stats.puts = new(atomic.Uint64)
+	kvs.q.Initialize(&kvs.lockList, &kvs.mp)
 	return kvs
 }
 
@@ -84,27 +86,26 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	}*/
 
 	if value, found := kv.mp[request.Key]; found {
-		response.Value = value
+		value.Lock()
+		defer value.Unlock()
+		response.Value = value.Value
 	}
 	return nil
 }
 
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
-	//vlk, ok := kv.mutexMap[request.Key]
+	vlk, ok := kv.mp[request.Key]
 	kv.stats.puts.Add(1)
-	/*if ok {
+	if ok {
 		vlk.Lock()
 		defer vlk.Unlock()
 	} else {
-		kv.Lock()
-		defer kv.Unlock()
+		kv.mp[request.Key] = new(kvs.Content)
+	}
 
-		kv.mutexMap[request.Key] = sync.Mutex{}
-	}*/
-	kv.Lock()
-	defer kv.Unlock()
-
-	kv.mp[request.Key] = request.Value
+	kv.mp[request.Key].Lock()
+	defer kv.mp[request.Key].Unlock()
+	kv.mp[request.Key].Value = request.Value
 
 	return nil
 }

@@ -1,6 +1,18 @@
 package kvs
 
-//parent classes
+import "sync"
+
+type Content struct {
+	sync.Mutex
+	Value string
+}
+
+type LockRequest struct {
+	locks []*sync.Mutex
+	ret   chan int
+}
+
+// parent classes
 type Request struct {
 	Key  string
 	Type string
@@ -9,7 +21,7 @@ type Request struct {
 
 type Response struct{}
 
-//inherited classes
+// inherited classes
 type PutRequest struct {
 	Request
 	Key   string
