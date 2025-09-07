@@ -1,0 +1,22 @@
+
+option go_package = "./proto";
+
+package kvs;
+
+service KVService {
+	rpc Batch (BatchRequest) returns (BatchReply) {}
+}
+
+message Ops {
+	required string Key = 1;
+	optional string Value = 2;
+	required bool IsRead = 3;
+}
+
+message BatchRequest {
+	repeated Ops opList = 1;
+}
+
+message BatchReply {
+	repeated string Values = 1;
+}

@@ -2,17 +2,19 @@ package main
 
 import (
 	//"hash/fnv"
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net"
-	"net/http"
-	"net/rpc"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
+	pb "github.com/rstutsman/cs6450-labs/kvs/proto"
+
+	"google.golang.org/grpc"
 )
 
 type Stats struct {
@@ -20,20 +22,33 @@ type Stats struct {
 	gets *atomic.Uint64
 }
 
+// use the KVService mutex when we need to add/remove keys
+// use the mutexMap mutex for getting/setting existing keys
+type KVService struct {
+	pb.UnimplementedKVServiceServer
+	//mp        map[string]*atomic.Value
+	mp        sync.Map
+	stats     Stats
+	prevStats Stats
+	lastPrint time.Time
+}
+
 func (s *Stats) Init() {
 	s.puts = new(atomic.Uint64)
 	s.gets = new(atomic.Uint64)
 }
 
-func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatch) error {
-	response.Values = make([]string, len(request.Ops))
+// func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatch) error {
+func (kv *KVService) Batch(_ context.Context, in *pb.BatchRequest) (*pb.BatchReply, error) {
+	list := in.GetOpList()
+	reply := pb.BatchReply{Values: make([]string, len(list))}
 	//kv.Lock()
 	//defer kv.Unlock()
 
-	for i, op := range request.Ops {
-		if op.IsRead {
+	for i, op := range list {
+		if op.GetIsRead() {
 			if v, ok := kv.mp.Load(op.Key); ok {
-				response.Values[i] = v.(string)
+				reply.Values[i] = v.(string)
 			}
 			kv.stats.gets.Add(1)
 
@@ -42,7 +57,7 @@ func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatc
 			kv.stats.puts.Add(1)
 		}
 	}
-	return nil
+	return &reply, nil
 }
 
 func (s *Stats) Sub(prev *Stats) Stats {
@@ -52,17 +67,6 @@ func (s *Stats) Sub(prev *Stats) Stats {
 	r.puts.Store(s.puts.Load() - prev.puts.Load())
 	r.gets.Store(s.gets.Load() - prev.gets.Load())
 	return r
-}
-
-// use the KVService mutex when we need to add/remove keys
-// use the mutexMap mutex for getting/setting existing keys
-type KVService struct {
-	sync.Mutex
-	//mp        map[string]*atomic.Value
-	mp        sync.Map
-	stats     Stats
-	prevStats Stats
-	lastPrint time.Time
 }
 
 func NewKVService() *KVService {
@@ -132,8 +136,8 @@ func main() {
 	flag.Parse()
 
 	kvs := NewKVService()
-	rpc.Register(kvs)
-	rpc.HandleHTTP()
+	//rpc.Register(kvs)
+	//rpc.HandleHTTP()
 
 	l, e := net.Listen("tcp", fmt.Sprintf(":%v", *port))
 	if e != nil {
@@ -141,6 +145,8 @@ func main() {
 	}
 
 	fmt.Printf("Starting KVS server on :%s\n", *port)
+	s := grpc.NewServer()
+	pb.RegisterKVServiceServer(s, kvs)
 
 	go func() {
 		for {
@@ -149,5 +155,8 @@ func main() {
 		}
 	}()
 
-	http.Serve(l, nil)
+	if err := s.Serve(l); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
+	//http.Serve(l, nil)
 }

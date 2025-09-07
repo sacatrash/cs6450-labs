@@ -16,6 +16,14 @@ GOGET := $(GOCMD) get
 GOMOD := $(GOCMD) mod
 GOFMT := $(GOCMD) fmt
 
+#protoc parameters
+PROTOC := protoc
+PROTOC_GO_OUT := .
+PROTOC_GO_OPT := paths=source_relative
+PROTOC_GO_GRPC_OUT := .
+PROTOC_GO_GRPC_OPT := paths=source_relative
+PROTOC_OUT := rpc.proto
+
 # Build flags
 BUILD_FLAGS := -v # print package names as they are compiled
 
@@ -31,9 +39,13 @@ help:
 
 build: build-server build-client ## Build both server and client binaries (default)
 
-build-server: $(SERVER_BINARY) ## Build the KVS server binary
+build-server: build-proto $(SERVER_BINARY) ## Build the KVS server binary
 
-build-client: $(CLIENT_BINARY) ## Build the KVS client binary
+build-client: build-proto $(CLIENT_BINARY) ## Build the KVS client binary
+
+build-proto:
+	@echo "Building protobuf..."
+	$(PROOTC) --go_out=$(PROTOC_GO_OUT) --go_opt=$(PROTOC_GO_OPT) --go-grpc_out=$(PROTOC_GO_GRPC_OUT) --go-grpc_opt=$(PROTOC_GO_GRPC_OPT) $(PROTOC_OUT)
 
 $(SERVER_BINARY): $(BIN_DIR) $(wildcard kvs/server/*.go) $(wildcard kvs/*.go)
 	@echo "Building KVS server..."
