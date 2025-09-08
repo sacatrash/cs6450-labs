@@ -23,10 +23,11 @@ Performance Grading Scale (YCSB-B, θ = 0.99) (only one component of the scoring
 
 2. Design [3 to 4 paragraphs]
 
-    Our current server-client architecture utilizes a 4096 element buffer to batch operations into grouped RPC calls. The buffer is flushed upon either filling up, or after a specified amount of time has passed. We tweaked the time vs. buffer capacity to maximize data getting sent but not to be significantly delayed by long operations, ending with 20 ms ttl.
+    Our current server-client architecture utilizes a 4096 element buffer to batch operations into grouped RPC calls. The buffer is flushed upon either filling up, or after a specified amount of time has passed. We tweaked the time vs. buffer capacity to maximize data getting sent but not to be significantly delayed by long operations.
 
-    Server-side, the key-value store is stored with an atomic map, eliminating the need for a master key for reads and writes. The master key is still used when a new value is being added into the data.
+    We increased the flush interval "ttlFlush" to 20 ms so batches fill up before sending. Previously we flushed too often, creating small batches and lower throughput. Larger batches cut RPC overhead and improved throughput.We also added async sending with double buffering. One buffer sends while the buffer fills. This avoids client idle time and keeps requests flowing without waiting on network round trips. 
 
+    On the server, we replaced the global lock with Go’s sync.Map so most reads and updates can happen at the same time rather than waiting in line. We only take a lock when adding a brand-new key. Reads and updates to existing keys run in parallel and stay fast.
     
 
 3. Reproducibility [a few clear steps]
