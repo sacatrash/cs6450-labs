@@ -29,19 +29,24 @@ func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatc
 	response.Values = make([]string, len(request.Ops))
 	//kv.Lock()
 	//defer kv.Unlock()
+	var localGets, localPuts uint64
 
 	for i, op := range request.Ops {
 		if op.IsRead {
 			if v, ok := kv.mp.Load(op.Key); ok {
 				response.Values[i] = v.(string)
 			}
-			kv.stats.gets.Add(1)
+			//kv.stats.gets.Add(1)
+			localGets++
 
 		} else {
 			kv.mp.Store(op.Key, op.Value)
-			kv.stats.puts.Add(1)
+			//kv.stats.puts.Add(1)
+			localPuts++
 		}
 	}
+	if localGets > 0 { kv.stats.gets.Add(localGets) }
+    if localPuts > 0 { kv.stats.puts.Add(localPuts) }
 	return nil
 }
 

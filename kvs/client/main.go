@@ -1,6 +1,11 @@
+
 package main
 
 import (
+
+	
+	"sync"
+	"hash/fnv"
 	"flag"
 	"fmt"
 	"log"
@@ -13,8 +18,23 @@ import (
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
+
+type perHost struct {
+    c        *Client
+    active   []kvs.Op
+    spare    []kvs.Op
+    deadline time.Time
+    sendq    chan []kvs.Op
+}
+
 type Client struct {
 	rpcClient *rpc.Client
+}
+
+func hashKey(s string) uint32 {
+    h := fnv.New32a()
+    _, _ = h.Write([]byte(s))
+    return h.Sum32()
 }
 
 func Dial(addr string) *Client {
@@ -59,60 +79,79 @@ func (client *Client) Batch(ops []kvs.Op) []string {
 	return response.Values
 }
 
-func runClient(id int, addr string, done *atomic.Bool, workload *kvs.Workload, resultsCh chan<- uint64) {
-	client := Dial(addr)
+func runClient(id int, addrs []string, done *atomic.Bool, workload *kvs.Workload, resultsCh chan<- uint64) {
+    batchSize := 4096
+    ttlFlush := time.Millisecond
 
-	value := strings.Repeat("x", 128)
-	const batchSize = 4096
-	const ttlFlush = time.Millisecond
-	batch := make([]kvs.Op, 0, batchSize)
-	deadline := time.Now().Add(ttlFlush)
+    hosts := make([]*perHost, len(addrs))
+    var wg sync.WaitGroup
+    var opsDone atomic.Uint64
 
-	opsCompleted := uint64(0)
+    
+    for i, addr := range addrs {
+        h := &perHost{
+            c:        Dial(addr),
+            active:   make([]kvs.Op, 0, batchSize),
+            spare:    make([]kvs.Op, 0, batchSize),
+            deadline: time.Now().Add(ttlFlush),
+            sendq:    make(chan []kvs.Op, 2), 
+        }
+        hosts[i] = h
 
-	flushBatch := func() {
-		results := client.Batch(batch)
-		opsCompleted += uint64(len(results))
-		batch = batch[:0]
-		deadline = time.Now().Add(ttlFlush)
-	}
+        wg.Add(1)
+        go func(h *perHost) {
+            defer wg.Done()
+            for b := range h.sendq {
+                res := h.c.Batch(b)             
+                opsDone.Add(uint64(len(res)))   
+            }
+        }(h)
+    }
 
-	for !done.Load() {
-		for j := 0; j < batchSize; j++ {
-			op := workload.Next()
-			//key := fmt.Sprintf("%d", op.Key)
-			key := strconv.FormatUint(op.Key, 10)
-			/*
-				if op.IsRead {
-					client.Get(key)
-				} else {
-					client.Put(key, value)
-				}
-				opsCompleted++
-			*/
-			if op.IsRead {
-				batch = append(batch, kvs.Op{IsRead: true, Key: key})
+    value := strings.Repeat("x", 128)
 
-			} else {
-				batch = append(batch, kvs.Op{IsRead: false, Key: key, Value: value})
+    flushOne := func(h *perHost) {
+        if len(h.active) == 0 { return }
+        full := h.active
+        h.active, h.spare = h.spare[:0], full
+        h.deadline = time.Now().Add(ttlFlush)
+        h.sendq <- full
+    }
 
-			}
+    flushExpired := func() {
+        now := time.Now()
+        for _, h := range hosts {
+            if now.After(h.deadline) && len(h.active) > 0 {
+                flushOne(h)
+            }
+        }
+    }
 
-			if len(batch) >= cap(batch) || time.Now().After(deadline) {
-				flushBatch()
-			}
-			if done.Load() {
-				break
-			}
-		}
-	}
-	if len(batch) > 0 {
-		flushBatch()
-	}
+    for !done.Load() {
+        for j := 0; j < 4096 && !done.Load(); j++ {
+            op := workload.Next()
+            key := strconv.FormatUint(op.Key, 10)
+            shard := int(hashKey(key) % uint32(len(hosts)))
+            h := hosts[shard]
 
-	fmt.Printf("Client %d finished operations.\n", id)
+            if op.IsRead {
+                h.active = append(h.active, kvs.Op{IsRead: true, Key: key})
+            } else {
+                h.active = append(h.active, kvs.Op{IsRead: false, Key: key, Value: value})
+            }
+            if len(h.active) >= cap(h.active) {
+                flushOne(h)
+            }
+        }
+        flushExpired()
+    }
 
-	resultsCh <- opsCompleted
+    for _, h := range hosts { flushOne(h) }
+    for _, h := range hosts { close(h.sendq) }
+    wg.Wait()
+
+    fmt.Printf("Client %d finished operations.\n", id)
+    resultsCh <- opsDone.Load()
 }
 
 type HostList []string
@@ -127,79 +166,80 @@ func (h *HostList) Set(value string) error {
 }
 
 func main() {
-	hosts := HostList{}
+    hosts := HostList{}
 
-	flag.Var(&hosts, "hosts", "Comma-separated list of host:ports to connect to")
-	theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
-	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C)")
-	//addition
-	host_generators := flag.Int("host_generators", 2, "generators per host")
+    flag.Var(&hosts, "hosts", "Comma-separated list of host:ports to connect to")
+    theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
+    workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C)")
+    //addition
+    host_generators := flag.Int("host_generators", 2, "generators per host")
 
-	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
-	flag.Parse()
+    secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
+    flag.Parse()
 
-	if len(hosts) == 0 {
-		hosts = append(hosts, "localhost:8080")
-	}
+    if len(hosts) == 0 {
+        hosts = append(hosts, "localhost:8080")
+    }
 
-	fmt.Printf(
-		"hosts %v\n"+
-			"theta %.2f\n"+
-			"workload %s\n"+
-			"secs %d\n",
-		hosts, *theta, *workload, *secs,
-	)
+    fmt.Printf(
+        "hosts %v\n"+
+            "theta %.2f\n"+
+            "workload %s\n"+
+            "secs %d\n",
+        hosts, *theta, *workload, *secs,
+    )
 
-	start := time.Now()
+    start := time.Now()
 
-	done := atomic.Bool{}
-	//resultsCh := make(chan uint64)
-	resultsCh := make(chan uint64, len(hosts)*(*host_generators))
-	/*
-		host := hosts[0]
-		clientId := 0
-		go func(clientId int) {
-			workload := kvs.NewWorkload(*workload, *theta)
-			runClient(clientId, host, &done, workload, resultsCh)
-		}(clientId)
-	*/
-	/*
-		for i, host := range hosts {
-			clientId := i
-			go func(host string , clientId int) {
-				workload := kvs.NewWorkload(*workload , *theta)
-				runClient(clientId, host, &done, workload, resultsCh)
-			}(host, clientId)
-		}
-	*/
+    done := atomic.Bool{}
+    //resultsCh := make(chan uint64)
+    resultsCh := make(chan uint64, len(hosts)*(*host_generators))
+    /*
+        host := hosts[0]
+        clientId := 0
+        go func(clientId int) {
+            workload := kvs.NewWorkload(*workload, *theta)
+            runClient(clientId, host, &done, workload, resultsCh)
+        }(clientId)
+    */
+    /*
+        for i, host := range hosts {
+            clientId := i
+            go func(host string , clientId int) {
+                workload := kvs.NewWorkload(*workload , *theta)
+                runClient(clientId, host, &done, workload, resultsCh)
+            }(host, clientId)
+        }
+    */
 
-	for i, host := range hosts {
-		for g := 0; g < *host_generators; g++ {
-			clientId := i*(*host_generators) + g
-			go func(host string, clientId int) {
-				work_load := kvs.NewWorkload(*workload, *theta)
-				runClient(clientId, host, &done, work_load, resultsCh)
-			}(host, clientId)
-		}
-	}
+    for i := range hosts {
+        for g := 0; g < *host_generators; g++ {
+            clientId := i*(*host_generators) + g
 
-	time.Sleep(time.Duration(*secs) * time.Second)
-	done.Store(true)
+            go func(clientId int, addrs []string) {
+                work_load := kvs.NewWorkload(*workload, *theta)
+                runClient(clientId, addrs, &done, work_load, resultsCh)
+            }(clientId, hosts)
+        }
+    }
 
-	//opsCompleted := <-resultsCh
-	/*
-		var opsCompleted uint64
-		for range hosts {
-			opsCompleted += <- resultsCh
-		}
-	*/
-	var opsCompleted uint64
-	for i := 0; i < len(hosts)*(*host_generators); i++ {
-		opsCompleted += <-resultsCh
-	}
+    time.Sleep(time.Duration(*secs) * time.Second)
+    done.Store(true)
 
-	elapsed := time.Since(start)
+    //opsCompleted := <-resultsCh
+    /*
+        var opsCompleted uint64
+        for range hosts {
+            opsCompleted += <- resultsCh
+        }
+    */
+    var opsCompleted uint64
+    for i := 0; i < len(hosts)*(*host_generators); i++ {
+        opsCompleted += <-resultsCh
+    }
 
-	opsPerSec := float64(opsCompleted) / elapsed.Seconds()
-	fmt.Printf("throughput %.2f ops/s\n", opsPerSec)
+    elapsed := time.Since(start)
+
+    opsPerSec := float64(opsCompleted) / elapsed.Seconds()
+    fmt.Printf("throughput %.2f ops/s\n", opsPerSec)
 }
