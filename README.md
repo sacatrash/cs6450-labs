@@ -25,10 +25,11 @@ Performance Grading Scale (YCSB-B, θ = 0.99) (only one component of the scoring
 
 2. Design [3 to 4 paragraphs]
 
-    Changes you made to the design and what effect they had on performance
-    A rationale for these design choices
-    Trade-offs and design alternatives considered
-    Any performance bottleneck analyses you did to arrive at the above conclusions
+    Our current server-client architecture utilizes a 4096 element buffer to batch operations into grouped RPC calls. The buffer is flushed upon either filling up, or after a specified amount of time has passed. We tweaked the time vs. buffer capacity to maximize data getting sent but not to be significantly delayed by long operations, ending with 20 ms ttl.
+
+    Server-side, the key-value store is stored with an atomic map, eliminating the need for a master key for reads and writes. The master key is still used when a new value is being added into the data.
+
+    
 
 3. Reproducibility [a few clear steps]
 
@@ -38,6 +39,10 @@ Performance Grading Scale (YCSB-B, θ = 0.99) (only one component of the scoring
     Configuration parameters and their effects in particular if you've added "knobs"
 
 4. Reflections [1 to 4 paragraphs]
+
+    The first thing we tried was integrating a 64 byte batch buffer to group operations and reduce the number of locks/unlocks. This resultedin about 400k-800k ops/s, up to 1 mil. By adjusting the buffer to up to 4096 elements, we are now able to achieve around 2 mil.We then replaced the stats with atomic types, removing the need to lock whenever updating the stats. We later applied this changeto the map, using go's sync.map structure. This change likely improved our results by about 20k, though we didn't precisely compare.
+
+    There were some other things we tried but ended up abandoning as they didn't yield signfificant benefit.
 
     What you learned from the assignment
     What optimizations worked well and why
