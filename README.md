@@ -3,16 +3,14 @@ Required README.md Sections
 1. Results [1 to 2 paragraphs]
 
     Final throughput numbers:
-        node0 median 2374966 op/s
-        node1 median 2595395 op/s
+        node0 median 2572209 op/s
+        node1 median 2812553 op/s
 
-        total 4970361 op/s
+        total 5384762 op/s
 
-    Some rough numbers on hardware utilization metrics (CPU, memory, network)
+    Observed via htop, running on node0, the 16 threads can be observed to utilize about 30% usage while running, while memory utilization on node0 is not significant. Network traffic on node0 constituted to about 9 GB data, with 8 GB transmitted to clients and 1 GB received. 
 
-    Scaling characteristics (how performance changes with cluster size and/or with increasing offered client load)
-        At a minimum, if your approach scales run it with small scale and larger scale
-    Any performance graphs and visualizations for the above
+    Our approach should scale linearly with more nodes, as we designed the client-server architecture to shard, where clients send data to one server instead of to all servers. As long as if the number of servers scales proportionally with clients, we believe a proportional performance increase should be observed. 
 
 Performance Grading Scale (YCSB-B, θ = 0.99) (only one component of the scoring rubric):
 
@@ -33,16 +31,15 @@ Performance Grading Scale (YCSB-B, θ = 0.99) (only one component of the scoring
 
 3. Reproducibility [a few clear steps]
 
-    Step-by-step instructions to reproduce results
-    Hardware requirements and setup
-    Software dependencies and installation if anything more than go, etc
-    Configuration parameters and their effects in particular if you've added "knobs"
+    Hardware setup:         
 
 4. Reflections [1 to 4 paragraphs]
 
     The first thing we tried was integrating a 64 byte batch buffer to group operations and reduce the number of locks/unlocks. This resultedin about 400k-800k ops/s, up to 1 mil. By adjusting the buffer to up to 4096 elements, we are now able to achieve around 2 mil.We then replaced the stats with atomic types, removing the need to lock whenever updating the stats. We later applied this changeto the map, using go's sync.map structure. This change likely improved our results by about 20k, though we didn't precisely compare.
 
-    There were some other things we tried but ended up abandoning as they didn't yield signfificant benefit.
+    There were some other things we tried but ended up abandoning as they didn't yield signfificant benefit. We tried to improve upon the batching structure by implementing a queue on the server, which would manually schedule processing RPCs with the idea that we may be able to achieve a higher average ops/s across all nodes by distributing the workload. While sound in theory, in practice we were only able to accomplish a single-threaded queue. If we were to multithread it, we would have run into complications with locks between the different queues and the different batches to run.
+
+    Another thing we attempted was getting around HTTP being used by RPC, by utilizing gRPC. While a solid protocol and simple to implement on top of our existing code, the end result saw lower ops/s by about 40k. We think that, given the local environment that the nodes run, as well as the type of data being processed, gRPC/protobuf was less ideal for handling batches of data over the network.
 
     What you learned from the assignment
     What optimizations worked well and why
