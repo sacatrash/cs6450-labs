@@ -1,5 +1,3 @@
-readme
-Required README.md Sections
 1. Results [1 to 2 paragraphs]
 
     Final throughput numbers:
