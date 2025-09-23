@@ -45,7 +45,7 @@ func (n *Queue) addNew(name string) *Queue {
 	n.nextNode = tmp
 	tmp.nextNode = tmpNext
 	if tmpNext == nil || tmpNext == tmpNext.nextNode {
-		tmpNext = n
+		tmpNext.nextNode = n
 	}
 	return tmp
 }
@@ -103,16 +103,16 @@ func (m *MasterQueue) Process() {
 	m.Unlock()
 
 	if nodeProc != nil {
-		nodeProc.process(m.MaxElements, m.TargetMap, &m.Mutex, m.lockList)
+		nodeProc.process(m.MaxElements, m.TargetMap)
 	}
 }
 
 // processes elements in the queue, and updates priorities
 
-//TODO: modify for transactions
-func (q *Queue) process(maxElements int, mp *map[string]*Content, writeMtx *sync.Mutex, lockMtx *sync.Mutex) {
+// TODO: modify for transactions
+func (q *Queue) process(maxElements int, mp *map[string]*Content) {
 
-	for i := 0; i < maxElements && q.tasks.Front() != nil; i++ {
+	/*for i := 0; i < maxElements && q.tasks.Front() != nil; i++ {
 		q.Lock()
 		tsk := q.tasks.Remove(q.tasks.Front()).(Task)
 		q.Unlock()
@@ -156,6 +156,6 @@ func (q *Queue) process(maxElements int, mp *map[string]*Content, writeMtx *sync
 		for k := 0; k < len(l.locks); k++ {
 			l.locks[k].Unlock()
 		}
-	}
+	}*/
 
 }
