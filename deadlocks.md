@@ -33,5 +33,5 @@ Guarantees:
 * locks are acquired in time order, and only once a commit is being processed.
 * assume locks are sorted and obtained in a distinct order
 * because of the above guarantee, commits can be processed in parallel if they do not depend on another's locks being held
-* if any lock is locked, the commit will get the lock at the same time as the other servers, in the order by timestamp.
+* if any lock is locked, the commit will get the lock at the same order as the other servers, in the order by timestamp.
 * Only one timestamp may write to a key at any time.
