@@ -24,6 +24,8 @@ A complication: two transactions are sent at same time, received differently by 
 * Upon commit: if the commit is the earliest unprocessed rpc, process it via goroutine and move the timeframe up to its time
 * if the commit is not the earliest, do not process; queue for processing
 * if commit is beyond the timeframe's max range, drop/abort
+* the client must receive the output from all server's commits before properly reading any Get() values
+* optional: implement a rollback rpc, where if client doesn't receive all commits then rollback is sent to all servers to undo changes. Maybe servers can send between each other too?
 
 During processing:
 * 2PL gather all locks, release when done
