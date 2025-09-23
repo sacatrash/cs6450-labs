@@ -2,8 +2,6 @@
 package main
 
 import (
-
-	
 	"sync"
 	"hash/fnv"
 	"flag"
@@ -15,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+    "github.com/google/uuid"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
@@ -29,6 +28,8 @@ type perHost struct {
 
 type Client struct {
 	rpcClient *rpc.Client
+    Name string
+    Dest string
 }
 
 func hashKey(s string) uint32 {
@@ -43,7 +44,7 @@ func Dial(addr string) *Client {
 		log.Fatal(err)
 	}
 
-	return &Client{rpcClient}
+	return &Client{rpcClient, uuid.New().String(), addr}
 }
 
 func (client *Client) Get(key string) string {
@@ -72,7 +73,7 @@ func (client *Client) Put(key string, value string) {
 }
 
 func (client *Client) Batch(ops []kvs.Op) []string {
-	request, response := kvs.RequestBatch{Ops: ops}, kvs.ResponseBatch{}
+	request, response := kvs.RequestBatch{Ops: ops, Src: client.Name, Dest: client.Dest}, kvs.ResponseBatch{}
 	if err := client.rpcClient.Call("KVService.Batch", &request, &response); err != nil {
 		log.Fatal(err)
 	}
