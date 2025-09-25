@@ -80,6 +80,90 @@ func (client *Client) Batch(ops []kvs.Op) []string {
 	return response.Values
 }
 
+/*NEW WORKLOAD TRANSACTION RPC (REMOTE PROCEDURE CALLS) REQUEST AND RESPONSE STRUCTS */
+
+type TxID string
+
+type  TxGetResp struct{
+    ok bool
+    Value string
+}
+
+type TxGetReq struct{
+    Tx TxID
+    Key string
+}
+
+type TxCommitReq struct{
+    Tx TxID
+    Lead bool
+}
+
+type TxCommitResp struct{
+    Ok bool
+}
+
+type TxPutReq struct{
+    Tx TxID
+    Key string
+    Value string
+}
+
+type TxPutResp struct{
+    Ok bool
+}
+
+type TxAbortReq struct{
+    Tx TxID
+}
+
+type TxAbortResp struct{}
+
+
+func TxGetRPC(rc *rpc.Client, txid string, key string) (string, bool){
+    request := TxGetReq{Tx: TxID(txid), Key:key}
+    var response TxGetResp
+    //for a RPC error , lets have the caller abort and retry
+    if err := rc.Call("KVService.TxGet", &request, &response); err != nil{
+        return "", false
+    }
+
+    if !response.Ok{
+        return "", false
+    }
+    return response.Value, true
+}
+
+func TxPutRPC(rc *rpc.Client, txid string, key, value string) bool{
+    request := TxPutReq{Tx: TxID(txid), Key:key, Value: value}
+    var response TxPutResp
+    if err := rc.Call("KVService.TxPut", &request, &response); err != nil{
+        return false
+    }
+    return response.Ok
+}
+//2PC train of thought, when this is called, the client will ask each. server to commit
+//if it fails, client can send txabortrpc - AKA 2 phase commit
+func TxCommitRPC(rc *rpc.Client, txid string, lead bool) bool{
+    request := TxCommitReq{Tx: TxID(txid), Lead: lead}
+    var response TxCommitResp
+    if err := rc.Call("KVService.TxCommit", &request, &response); err !=nil{
+        return false
+    }
+    return response.Ok
+}
+
+func TxAbortRPC(rc *rpc.Client, txid string) bool{
+    request := TxAbortReq{Tx: TxID(txid)}
+    var response TxAbortResp
+    if err := rc.Call("KVService.TxAbort", &request, &response); err != nil{
+        return false
+    }
+    return true
+}
+
+/* ##############################*/
+
 func runClient(id int, addrs []string, done *atomic.Bool, workload *kvs.Workload, resultsCh chan<- uint64) {
     batchSize := 4096
     ttlFlush := time.Millisecond
@@ -155,6 +239,8 @@ func runClient(id int, addrs []string, done *atomic.Bool, workload *kvs.Workload
     resultsCh <- opsDone.Load()
 }
 
+
+
 type HostList []string
 
 func (h *HostList) String() string {
@@ -165,12 +251,13 @@ func (h *HostList) Set(value string) error {
 	*h = strings.Split(value, ",")
 	return nil
 }
-
+/*EDIT main*/
 func main() {
     hosts := HostList{}
 
     flag.Var(&hosts, "hosts", "Comma-separated list of host:ports to connect to")
     theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
+    //INCLUDE XFER BELOW
     workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C)")
     //addition
     host_generators := flag.Int("host_generators", 2, "generators per host")
@@ -189,6 +276,7 @@ func main() {
             "secs %d\n",
         hosts, *theta, *workload, *secs,
     )
+
 
     start := time.Now()
 
