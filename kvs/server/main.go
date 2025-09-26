@@ -103,14 +103,22 @@ func (kv *KVService) GetNewOrder() int {
 	return len(kv.ordMtx)
 }
 
-func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
-	kv.stats.puts.Add(1)
-	v, ok = kv.mp.Get(request.Key)
+func (kv *KVService) PutAndCheck(key string, value string) {
+	v, ok = kv.mp.Get(key)
 	if(!ok) {
-		tmp := Content{Order: kv.GetNewOrder(), Value: request.Value}
-		kv.mp.Store(request.Key, tmp)
+		tmp := Content{Order: kv.GetNewOrder(), Value: value}
+		kv.mp.Store(key, tmp)
 		kv.ordMtx = append(kv.ordMtx, tmp)
 	}
+	else {
+		v.setContent(value)
+	}
+}
+
+func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
+	kv.stats.puts.Add(1)
+	
+	vk.PutAndCheck(request.Key, request.Value)
 
 	return nil
 }
