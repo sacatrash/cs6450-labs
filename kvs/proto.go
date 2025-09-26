@@ -20,9 +20,14 @@ type GetResponse struct {
 
 type Content struct {
 	sync.Mutex
+	Order int
 	Value string
 }
 
+
+func (*Content c) setContent(newValue string) {
+	c.Value = newValue
+}
 /*
 type LockRequest struct {
 	locks []*sync.Mutex

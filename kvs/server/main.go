@@ -68,6 +68,7 @@ type KVService struct {
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
+	ordMtx []Content*
 }
 
 func NewKVService() *KVService {
@@ -98,10 +99,18 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	return nil
 }
 
+func (kv *KVService) GetNewOrder() int {
+	return len(kv.ordMtx)
+}
+
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
 	kv.stats.puts.Add(1)
-
-	kv.mp.Store(request.Key, request.Value)
+	v, ok = kv.mp.Get(request.Key)
+	if(!ok) {
+		tmp := Content{Order: kv.GetNewOrder(), Value: request.Value}
+		kv.mp.Store(request.Key, tmp)
+		kv.ordMtx = append(kv.ordMtx, tmp)
+	}
 
 	return nil
 }
