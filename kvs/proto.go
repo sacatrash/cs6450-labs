@@ -39,6 +39,13 @@ type LockRequest struct {
 
 type TxID string
 
+type Transaction struct {
+	//req Request
+	Key string
+	op Op
+	time Time
+}
+
 type  TxGetResp struct{
     ok bool
     Value string
