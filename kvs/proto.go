@@ -2,20 +2,10 @@ package kvs
 
 import "sync"
 
-type PutRequest struct {
-	Key   string
-	Value string
-}
-
-type PutResponse struct {
-}
-
-type GetRequest struct {
+type Op struct {
 	Key string
-}
-
-type GetResponse struct {
 	Value string
+	IsRead bool
 }
 
 type Content struct {
@@ -24,10 +14,39 @@ type Content struct {
 	Value string
 }
 
-
 func (*Content c) setContent(newValue string) {
 	c.Value = newValue
 }
+
+type Request struct {
+
+}
+
+type Response struct {
+	Ok bool
+}
+
+type PutRequest struct {
+	Request
+	Key string
+	Value string
+}
+
+type PutResponse struct {
+	Response
+}
+
+type GetRequest struct {
+	Request
+	Key string
+}
+
+type GetResponse struct {
+	Response
+	Value string
+}
+
+
 /*
 type LockRequest struct {
 	locks []*sync.Mutex
@@ -47,36 +66,43 @@ type Transaction struct {
 }
 
 type  TxGetResp struct{
+	Response
     ok bool
     Value string
 }
 
 type TxGetReq struct{
+	Request
     Tx TxID
     Key string
 }
 
 type TxCommitReq struct{
+	Request
     Tx TxID
     Lead bool
 }
 
 type TxCommitResp struct{
-    Ok bool
+	Response
 }
 
 type TxPutReq struct{
+	Request
     Tx TxID
     Key string
     Value string
 }
 
 type TxPutResp struct{
-    Ok bool
+	Response
 }
 
 type TxAbortReq struct{
+	Request
     Tx TxID
 }
 
-type TxAbortResp struct{}
+type TxAbortResp struct{
+	Response
+}
