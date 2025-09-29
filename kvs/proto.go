@@ -58,16 +58,38 @@ type LockRequest struct {
 
 type TxID string
 
+//PRE LOCK
+type lockMode string
+const (
+	lock_S lockMode = "S"
+	lock_X lockMode = "X"
+)
+
+type txLockItem struct {
+	Key string
+	Mode lockMode
+}
+//these prepares are to preacquire s/x locks in a single ordered way
+type txPrepareResponse struct{
+	Response
+}
+
+type txPrepareRequest struct{
+	Request
+	Tx TxID
+	Items []txLockItem
+}
+/*
 type Transaction struct {
 	//req Request
 	Key string
 	op Op
 	time Time
 }
-
+*/
 type  TxGetResp struct{
 	Response
-    ok bool
+    //ok bool
     Value string
 }
 
@@ -77,32 +99,32 @@ type TxGetReq struct{
     Key string
 }
 
-type TxCommitReq struct{
+type TxCommitRequest struct{
 	Request
     Tx TxID
     Lead bool
 }
 
-type TxCommitResp struct{
+type TxCommitResponse struct{
 	Response
 }
 
-type TxPutReq struct{
+type TxPutRequest struct{
 	Request
     Tx TxID
     Key string
     Value string
 }
 
-type TxPutResp struct{
+type TxPutResponse struct{
 	Response
 }
 
-type TxAbortReq struct{
+type TxAbortRequest struct{
 	Request
     Tx TxID
 }
 
-type TxAbortResp struct{
+type TxAbortResponse struct{
 	Response
 }

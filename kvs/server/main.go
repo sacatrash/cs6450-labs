@@ -20,6 +20,18 @@ type Stats struct {
 	gets *atomic.Uint64
 }
 
+type keyLock struct{
+	readers map[string]struct{}
+	writer string
+}
+
+type txState struct{
+	writes map[string]string
+	s_held map[string]struct{}
+	x_held map[string]struct{}
+	active bool
+}
+
 func (s *Stats) Init() {
 	s.puts = new(atomic.Uint64)
 	s.gets = new(atomic.Uint64)
@@ -64,22 +76,30 @@ func (s *Stats) Sub(prev *Stats) Stats {
 type KVService struct {
 	sync.Mutex
 	//mp        map[string]*atomic.Value
+	mu sync.Mutex
 	mp        sync.Map
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
 	ordMtx []Content*
-}
 
+	locks map[string]*keyLock
+	txs map[string]*txState
+
+}
+//EDITED
 func NewKVService() *KVService {
 	kvs := &KVService{}
 	//kvs.mp = make(map[string]*atomic.Value)
-	kvs.mp = sync.Map{}
+	//kvs.mp = sync.Map{}
+	kvs.txs = make(map[string]*txState)
+	kvs.locks = make(map[string]*keyLock)
 	kvs.lastPrint = time.Now()
 	kvs.stats.Init()
 	kvs.prevStats.Init()
 	return kvs
 }
+
 
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
 	kv.stats.gets.Add(1)
