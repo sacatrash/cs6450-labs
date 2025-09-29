@@ -87,44 +87,44 @@ type Transaction struct {
 	time Time
 }
 */
-type  TxGetResp struct{
+type  txGetResponse struct{
 	Response
     //ok bool
     Value string
 }
 
-type TxGetReq struct{
+type txGetRequest struct{
 	Request
     Tx TxID
     Key string
 }
 
-type TxCommitRequest struct{
+type txCommitRequest struct{
 	Request
     Tx TxID
     Lead bool
 }
 
-type TxCommitResponse struct{
+type txCommitResponse struct{
 	Response
 }
 
-type TxPutRequest struct{
+type txPutRequest struct{
 	Request
     Tx TxID
     Key string
     Value string
 }
 
-type TxPutResponse struct{
+type txPutResponse struct{
 	Response
 }
 
-type TxAbortRequest struct{
+type txAbortRequest struct{
 	Request
     Tx TxID
 }
 
-type TxAbortResponse struct{
+type txAbortResponse struct{
 	Response
 }

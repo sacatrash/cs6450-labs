@@ -82,8 +82,10 @@ func (client *Client) Batch(ops []kvs.Op) []string {
 
 
 func TxGetRPC(rc *rpc.Client, txid string, key string) (string, bool){
-    request := TxGetReq{Tx: TxID(txid), Key:key}
-    var response TxGetResp
+    //request := txGetRequest{Tx: TxID(txid), Key:key}
+    request := kvs.txGetRequest{Tx: kvs.TxID(txid), Key:key}
+    //var response txGetResponse
+    var response kvs.txGetResponse
     //for a RPC error , lets have the caller abort and retry
     if err := rc.Call("KVService.TxGet", &request, &response); err != nil{
         return "", false
@@ -95,33 +97,47 @@ func TxGetRPC(rc *rpc.Client, txid string, key string) (string, bool){
     return response.Value, true
 }
 
+
 func TxPutRPC(rc *rpc.Client, txid string, key, value string) bool{
-    request := TxPutRequest{Tx: TxID(txid), Key:key, Value: value}
-    var response TxPutResponse
+    //request := txPutRequest{Tx: TxID(txid), Key:key, Value: value}
+    request := kvs.txPutRequest{Tx: kvs.TxID(txid), Key:key, Value: value}
+    //var response txPutResponse
+    var response kvs.txPutResponse
+
     if err := rc.Call("KVService.TxPut", &request, &response); err != nil{
         return false
     }
     return response.Ok
 }
+
+
 //2PC train of thought, when this is called, the client will ask each. server to commit
 //if it fails, client can send txabortrpc - AKA 2 phase commit
 func TxCommitRPC(rc *rpc.Client, txid string, lead bool) bool{
-    request := TxCommitRequest{Tx: TxID(txid), Lead: lead}
-    var response TxCommitResponse
+    //request := txCommitRequest{Tx: TxID(txid), Lead: lead}
+    request := kvs.txCommitRequest{Tx: kvs.TxID(txid), Lead: lead}
+    //var response txCommitResponse
+    var response kvs.txCommitResponse
     if err := rc.Call("KVService.TxCommit", &request, &response); err !=nil{
         return false
     }
     return response.Ok
 }
 
+
+
 func TxAbortRPC(rc *rpc.Client, txid string) bool{
-    request := TxAbortRequest{Tx: TxID(txid)}
-    var response TxAbortResponse
+    //request := txAbortRequest{Tx: TxID(txid)}
+    request := kvs.txAbortRequest{Tx: kvs.TxID(txid)}
+    //var response txAbortResponse
+    var response kvs.txAbortResponse
     if err := rc.Call("KVService.TxAbort", &request, &response); err != nil{
         return false
     }
     return true
 }
+
+
 
 /* ##############################*/
 
