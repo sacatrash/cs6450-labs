@@ -99,8 +99,93 @@ func NewKVService() *KVService {
 	kvs.prevStats.Init()
 	return kvs
 }
+//CHECK THIS, EDIT IT MORE?
+// will return the commited value holder for key. if the key does not
+//exist , one will be created and will store it in the sync map
+func (kv *KVService) getOrCreateCommitt(key string) *kvs.Content{
+	if v, found := kv.mp.Load(key); found {
+        if c, ok := v.(*kvs.Content); ok {
+			return c
+        }
+        if s, ok := v.(string); ok {
+            c := &kvs.Content{Order: len(kv.ordMtx), Value: s}
+            kv.mp.Store(key, c)
+            kv.ordMtx = append(kv.ordMtx, c)
+            return c
+        }
+    }
 
+    c := &kvs.Content{Order: len(kv.ordMtx)}
+    kv.mp.Store(key, c)
+    kv.ordMtx = append(kv.ordMtx, c)
+	return c
+}
 
+func (kv *KVService) getOrCreateLockState(key string) *keyLock{
+	lok, ok := kv.locks[key]
+	if !ok{
+		lok = &keyLock{readers: map[string]struct{}{}}
+		kv.locks[key]=lok
+	}
+	return lok
+}
+
+func (kv *KVService) getOrCreateTxState(txid string) *txState{
+	state,ok := kv.txs[txid]
+	if !ok{
+		st = &txState{
+			writes: map[string]string{},
+			s_held: map[string]struct{}{},
+			x_held: map[string]struct{}{},
+			active: true,
+		}
+		kv.txs[txid]=state
+	}
+	return state
+}
+
+//non blocking lock requests, grant the lock if its safe to do so
+func (kv *KVService) try_S(txid, key string) bool{
+	lok := kv.getOrCreateLockState(key)
+	if lok.writer != "" && lok.writer != txid{
+		return false
+	}
+	lok.readers[txid]= struct{}{}
+	kv.tx(txid).s_held[key]= struct{}{}
+	return true
+}
+
+func (kv *KVService) try_X(txid, key string)bool{
+	lok := kv.getOrCreateLockState(key)
+	if lok.writer == txid{
+		return true
+	}
+	if lok.writer != "" && lok.writer != txid{
+		return false
+	}
+	if len(lok.readers)>0{
+		if _,ok := lok.readers[txid]; !ok{ return false}
+		delete(lok.readers,txid)
+		delete(kv.tx(txid).s_held, key)
+	}
+	lok.writer = txid
+	kv.tx(txid).x_held[key] = struct{}{}
+	return true
+}
+//transaction clean up- drop every lock that tx holds and remove its staged state. why?
+//so other transactions can continue and locks or memory is leaked
+func (kv *KVService) txCleanUp(txid string){
+	state, ok := kv.txs[txid]
+	if ok{
+		for k := range state.s_held{
+			delete(kv.getOrCreateLockState(k).readers, txid)
+		}
+		for k := range state.x_held{
+			if kv.getOrCreateLockState(k).writer == txid { kv.getOrCreateLockState(k).writer =""}
+		}
+		delete(kv.txs,txid)
+	}
+}
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
 	kv.stats.gets.Add(1)
 	/*vlk, ok := kv.mutexMap[request.Key]
