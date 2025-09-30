@@ -14,7 +14,7 @@ type Content struct {
 	Value string
 }
 
-func (*Content c) setContent(newValue string) {
+func (c *Content) setContent(newValue string) {
 	c.Value = newValue
 }
 
@@ -65,16 +65,16 @@ const (
 	lock_X lockMode = "X"
 )
 
-type txLockItem struct {
+type TxLockItem struct {
 	Key string
 	Mode lockMode
 }
 //these prepares are to preacquire s/x locks in a single ordered way
-type txPrepareResponse struct{
+type TxPrepareResponse struct{
 	Response
 }
 
-type txPrepareRequest struct{
+type TxPrepareRequest struct{
 	Request
 	Tx TxID
 	Items []txLockItem
@@ -87,44 +87,44 @@ type Transaction struct {
 	time Time
 }
 */
-type  txGetResponse struct{
+type TxGetResponse struct{
 	Response
     //ok bool
     Value string
 }
 
-type txGetRequest struct{
+type TxGetRequest struct{
 	Request
     Tx TxID
     Key string
 }
 
-type txCommitRequest struct{
+type TxCommitRequest struct{
 	Request
     Tx TxID
     Lead bool
 }
 
-type txCommitResponse struct{
+type TxCommitResponse struct{
 	Response
 }
 
-type txPutRequest struct{
+type TxPutRequest struct{
 	Request
     Tx TxID
     Key string
     Value string
 }
 
-type txPutResponse struct{
+type TxPutResponse struct{
 	Response
 }
 
-type txAbortRequest struct{
+type TxAbortRequest struct{
 	Request
     Tx TxID
 }
 
-type txAbortResponse struct{
+type TxAbortResponse struct{
 	Response
 }

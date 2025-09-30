@@ -83,9 +83,9 @@ func (client *Client) Batch(ops []kvs.Op) []string {
 
 func TxGetRPC(rc *rpc.Client, txid string, key string) (string, bool){
     //request := txGetRequest{Tx: TxID(txid), Key:key}
-    request := kvs.txGetRequest{Tx: kvs.TxID(txid), Key:key}
+    request := kvs.TxGetRequest{Tx: kvs.TxID(txid), Key:key}
     //var response txGetResponse
-    var response kvs.txGetResponse
+    var response kvs.TxGetResponse
     //for a RPC error , lets have the caller abort and retry
     if err := rc.Call("KVService.TxGet", &request, &response); err != nil{
         return "", false
@@ -104,7 +104,7 @@ func TxPutRPC(rc *rpc.Client, txid string, key, value string) bool{
     //var response txPutResponse
     var response kvs.txPutResponse
 
-    if err := rc.Call("KVService.TxPut", &request, &response); err != nil{
+    if err := rc.Call("KVService.txPut", &request, &response); err != nil{
         return false
     }
     return response.Ok

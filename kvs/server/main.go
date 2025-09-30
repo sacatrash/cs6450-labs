@@ -74,14 +74,14 @@ func (s *Stats) Sub(prev *Stats) Stats {
 // use the KVService mutex when we need to add/remove keys
 // use the mutexMap mutex for getting/setting existing keys
 type KVService struct {
-	sync.Mutex
+	//sync.Mutex
 	//mp        map[string]*atomic.Value
 	mu sync.Mutex
 	mp        sync.Map
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
-	ordMtx []Content*
+	ordMtx []*kvs.Content
 
 	locks map[string]*keyLock
 	txs map[string]*txState
@@ -92,27 +92,30 @@ func NewKVService() *KVService {
 	kvs := &KVService{}
 	//kvs.mp = make(map[string]*atomic.Value)
 	//kvs.mp = sync.Map{}
-	kvs.txs = make(map[string]*txState)
-	kvs.locks = make(map[string]*keyLock)
+	kvs.txs = make(map[string]*txState{})
+	kvs.locks = make(map[string]*keyLock{})
 	kvs.lastPrint = time.Now()
 	kvs.stats.Init()
 	kvs.prevStats.Init()
 	return kvs
 }
+
+
 //CHECK THIS, EDIT IT MORE?
 // will return the commited value holder for key. if the key does not
 //exist , one will be created and will store it in the sync map
 func (kv *KVService) getOrCreateCommitt(key string) *kvs.Content{
-	if v, found := kv.mp.Load(key); found {
-        if c, ok := v.(*kvs.Content); ok {
+	if v, ok := kv.mp.Load(key); ok {
+        if c, ok2 := v.(*kvs.Content); ok2 {
 			return c
         }
+		/*
         if s, ok := v.(string); ok {
             c := &kvs.Content{Order: len(kv.ordMtx), Value: s}
             kv.mp.Store(key, c)
             kv.ordMtx = append(kv.ordMtx, c)
             return c
-        }
+        }*/
     }
 
     c := &kvs.Content{Order: len(kv.ordMtx)}
@@ -130,6 +133,8 @@ func (kv *KVService) getOrCreateLockState(key string) *keyLock{
 	return lok
 }
 
+
+
 func (kv *KVService) getOrCreateTxState(txid string) *txState{
 	state,ok := kv.txs[txid]
 	if !ok{
@@ -144,6 +149,7 @@ func (kv *KVService) getOrCreateTxState(txid string) *txState{
 	return state
 }
 
+
 //non blocking lock requests, grant the lock if its safe to do so
 func (kv *KVService) try_S(txid, key string) bool{
 	lok := kv.getOrCreateLockState(key)
@@ -154,7 +160,9 @@ func (kv *KVService) try_S(txid, key string) bool{
 	kv.tx(txid).s_held[key]= struct{}{}
 	return true
 }
+/*
 
+*/
 func (kv *KVService) try_X(txid, key string)bool{
 	lok := kv.getOrCreateLockState(key)
 	if lok.writer == txid{
@@ -237,7 +245,7 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 //TX RPCs
 //read tx and check if it holds S or X. 
 //return a staged value if there is one
-func (kv *KVService) txGet( request *kvs.txGetRequest, response *kvs.txGetResponse) error{
+func (kv *KVService) txGet( request *kvs.TxGetRequest, response *kvs.TxGetResponse) error{
 
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -260,7 +268,8 @@ func (kv *KVService) txGet( request *kvs.txGetRequest, response *kvs.txGetRespon
 	response.Value = c.Value
 	return nil
 }
-func (kv *KVService) txPut(request *kvs.txPutRequest, response *kvs.txPutRequest)error{
+
+func (kv *KVService) txPut(request *kvs.TxPutRequest, response *kvs.TxPutRequest)error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	state:= kv.tx(string(request.Tx))
@@ -273,7 +282,7 @@ func (kv *KVService) txPut(request *kvs.txPutRequest, response *kvs.txPutRequest
 	return nil
 }
 
-func (kv *KVService) txCommit(request *kvs.txCommitRequest, response *kvs.txCommitResponse)error{
+func (kv *KVService) txCommit(request *kvs.TxCommitRequest, response *kvs.TxCommitResponse)error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	state, ok := kv.txs[string(request.Tx)]
@@ -292,8 +301,10 @@ func (kv *KVService) txCommit(request *kvs.txCommitRequest, response *kvs.txComm
 	response.Ok = true
 	return nil
 }
+
+
 //drop the staged write and release the locks
-func (kv *KVService) txAbort(request *kvs.txAbortRequest, response *kvs.txAbortResponse) error{
+func (kv *KVService) txAbort(request *kvs.TxAbortRequest, response *kvs.TxAbortResponse) error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	kv.txCleanUp(string(request.Tx))
@@ -303,7 +314,7 @@ func (kv *KVService) txAbort(request *kvs.txAbortRequest, response *kvs.txAbortR
 
 
 //get all of the requested locks per shard
-func (kv *KVService) txPrepare( request *kvs.txPrepareRequest, response *kvs.txPrepareResponse) error{
+func (kv *KVService) txPrepare( request *kvs.TxPrepareRequest, response *kvs.TxPrepareResponse) error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
@@ -326,7 +337,6 @@ func (kv *KVService) txPrepare( request *kvs.txPrepareRequest, response *kvs.txP
 	response.Ok = true
 	return nil
 }
-
 
 
 func (kv *KVService) printStats() {
