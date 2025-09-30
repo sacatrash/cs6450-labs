@@ -92,13 +92,14 @@ func NewKVService() *KVService {
 	kvs := &KVService{}
 	//kvs.mp = make(map[string]*atomic.Value)
 	//kvs.mp = sync.Map{}
-	kvs.txs = make(map[string]*txState{})
-	kvs.locks = make(map[string]*keyLock{})
+	kvs.txs = map[string]*txState{}
+	kvs.locks = map[string]*keyLock{}
 	kvs.lastPrint = time.Now()
 	kvs.stats.Init()
 	kvs.prevStats.Init()
 	return kvs
 }
+
 
 
 //CHECK THIS, EDIT IT MORE?
@@ -138,7 +139,7 @@ func (kv *KVService) getOrCreateLockState(key string) *keyLock{
 func (kv *KVService) getOrCreateTxState(txid string) *txState{
 	state,ok := kv.txs[txid]
 	if !ok{
-		st = &txState{
+		state = &txState{
 			writes: map[string]string{},
 			s_held: map[string]struct{}{},
 			x_held: map[string]struct{}{},
@@ -157,7 +158,7 @@ func (kv *KVService) try_S(txid, key string) bool{
 		return false
 	}
 	lok.readers[txid]= struct{}{}
-	kv.tx(txid).s_held[key]= struct{}{}
+	kv.getOrCreateTxState(txid).s_held[key]= struct{}{}
 	return true
 }
 /*
@@ -174,10 +175,10 @@ func (kv *KVService) try_X(txid, key string)bool{
 	if len(lok.readers)>0{
 		if _,ok := lok.readers[txid]; !ok{ return false}
 		delete(lok.readers,txid)
-		delete(kv.tx(txid).s_held, key)
+		delete(kv.getOrCreateTxState(txid).s_held, key)
 	}
 	lok.writer = txid
-	kv.tx(txid).x_held[key] = struct{}{}
+	kv.getOrCreateTxState(txid).x_held[key] = struct{}{}
 	return true
 }
 //transaction clean up- drop every lock that tx holds and remove its staged state. why?
@@ -253,7 +254,7 @@ func (kv *KVService) TxGet( request *kvs.TxGetRequest, response *kvs.TxGetRespon
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	state := kv.tx(string(request.Tx))
+	state := kv.getOrCreateTxState(string(request.Tx))
 	if v, ok := state.writes[reques.Key]; ok{
 		response.Value, response.Ok = v, true
 		return nil
@@ -294,7 +295,7 @@ func (kv *KVService) TxCommit(request *kvs.TxCommitRequest, response *kvs.TxComm
 		return nil
 	}
 
-	for k,v:range st.writes{
+	for k,v:= range st.writes{
 		c:= kv.getOrCreateCommitt(k)
 		c.Lock(v)
 		c.setContent(v)
@@ -304,6 +305,7 @@ func (kv *KVService) TxCommit(request *kvs.TxCommitRequest, response *kvs.TxComm
 	response.Ok = true
 	return nil
 }
+
 
 
 //drop the staged write and release the locks
