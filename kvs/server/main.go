@@ -239,7 +239,7 @@ func (kv *KVService) PutAndCheck(key string, value string) {
 
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
 	kv.stats.puts.Add(1)
-	kv.mpStore(request.Key, request.Value)
+	kv.mp.Store(request.Key, request.Value)
 	response.Ok=true
 	return nil
 	
@@ -255,13 +255,13 @@ func (kv *KVService) TxGet( request *kvs.TxGetRequest, response *kvs.TxGetRespon
 	defer kv.mu.Unlock()
 
 	state := kv.getOrCreateTxState(string(request.Tx))
-	if v, ok := state.writes[reques.Key]; ok{
+	if v, ok := state.writes[request.Key]; ok{
 		response.Value, response.Ok = v, true
 		return nil
 	}
 
-	if _, r:= st.s_held[request.Key]; !r{
-		if _, x := st.x_held[request.Key]; !x{
+	if _, r:= state.s_held[request.Key]; !r{
+		if _, x := state.x_held[request.Key]; !x{
 			response.Ok = false
 			return nil
 		}
@@ -276,7 +276,7 @@ func (kv *KVService) TxGet( request *kvs.TxGetRequest, response *kvs.TxGetRespon
 func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.TxPutRequest)error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	state:= kv.tx(string(request.Tx))
+	state:= kv.getOrCreateTxState(string(request.Tx))
 	if _, ok := state.x_held[request.Key]; !ok{
 		response.Ok = false
 		return nil
@@ -295,7 +295,7 @@ func (kv *KVService) TxCommit(request *kvs.TxCommitRequest, response *kvs.TxComm
 		return nil
 	}
 
-	for k,v:= range st.writes{
+	for k,v:= range state.writes{
 		c:= kv.getOrCreateCommitt(k)
 		c.Lock(v)
 		c.setContent(v)
