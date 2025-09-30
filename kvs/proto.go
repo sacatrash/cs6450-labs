@@ -77,7 +77,7 @@ type TxPrepareResponse struct{
 type TxPrepareRequest struct{
 	Request
 	Tx TxID
-	Items []txLockItem
+	Items []TxLockItem
 }
 /*
 type Transaction struct {

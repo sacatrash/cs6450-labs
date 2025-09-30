@@ -104,7 +104,7 @@ func TxPutRPC(rc *rpc.Client, txid string, key, value string) bool{
     //var response txPutResponse
     var response kvs.txPutResponse
 
-    if err := rc.Call("KVService.txPut", &request, &response); err != nil{
+    if err := rc.Call("KVService.TxPut", &request, &response); err != nil{
         return false
     }
     return response.Ok

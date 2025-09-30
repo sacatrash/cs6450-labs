@@ -206,7 +206,7 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	}*/
 
 	if value, found := kv.mp.Load(request.Key); ok {
-		switch valueVal : value.(type){
+		switch valueVal := value.(type){
 		case string:
 			response.Value = valueVal
 		case *kvs.Content:
@@ -222,6 +222,7 @@ func (kv *KVService) GetNewOrder() int {
 	return len(kv.ordMtx)
 }
 
+/* //helper function probably not needed
 func (kv *KVService) PutAndCheck(key string, value string) {
 	v, ok = kv.mp.Get(key)
 	if(!ok) {
@@ -233,19 +234,21 @@ func (kv *KVService) PutAndCheck(key string, value string) {
 		v.setContent(value)
 	}
 }
+*/
 
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
 	kv.stats.puts.Add(1)
-	
-	kv.PutAndCheck(request.Key, request.Value)
-
+	kv.mpStore(request.Key, request.Value)
+	response.Ok=true
 	return nil
+	
+	//kv.PutAndCheck(request.Key, request.Value)
 }
-  
+
 //TX RPCs
 //read tx and check if it holds S or X. 
 //return a staged value if there is one
-func (kv *KVService) txGet( request *kvs.TxGetRequest, response *kvs.TxGetResponse) error{
+func (kv *KVService) TxGet( request *kvs.TxGetRequest, response *kvs.TxGetResponse) error{
 
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -269,7 +272,7 @@ func (kv *KVService) txGet( request *kvs.TxGetRequest, response *kvs.TxGetRespon
 	return nil
 }
 
-func (kv *KVService) txPut(request *kvs.TxPutRequest, response *kvs.TxPutRequest)error{
+func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.TxPutRequest)error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	state:= kv.tx(string(request.Tx))
@@ -282,7 +285,7 @@ func (kv *KVService) txPut(request *kvs.TxPutRequest, response *kvs.TxPutRequest
 	return nil
 }
 
-func (kv *KVService) txCommit(request *kvs.TxCommitRequest, response *kvs.TxCommitResponse)error{
+func (kv *KVService) TxCommit(request *kvs.TxCommitRequest, response *kvs.TxCommitResponse)error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	state, ok := kv.txs[string(request.Tx)]
@@ -304,7 +307,7 @@ func (kv *KVService) txCommit(request *kvs.TxCommitRequest, response *kvs.TxComm
 
 
 //drop the staged write and release the locks
-func (kv *KVService) txAbort(request *kvs.TxAbortRequest, response *kvs.TxAbortResponse) error{
+func (kv *KVService) TxAbort(request *kvs.TxAbortRequest, response *kvs.TxAbortResponse) error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	kv.txCleanUp(string(request.Tx))
@@ -314,7 +317,7 @@ func (kv *KVService) txAbort(request *kvs.TxAbortRequest, response *kvs.TxAbortR
 
 
 //get all of the requested locks per shard
-func (kv *KVService) txPrepare( request *kvs.TxPrepareRequest, response *kvs.TxPrepareResponse) error{
+func (kv *KVService) TxPrepare( request *kvs.TxPrepareRequest, response *kvs.TxPrepareResponse) error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
