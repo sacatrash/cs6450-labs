@@ -100,9 +100,9 @@ func TxGetRPC(rc *rpc.Client, txid string, key string) (string, bool){
 
 func TxPutRPC(rc *rpc.Client, txid string, key, value string) bool{
     //request := txPutRequest{Tx: TxID(txid), Key:key, Value: value}
-    request := kvs.txPutRequest{Tx: kvs.TxID(txid), Key:key, Value: value}
+    request := kvs.TxPutRequest{Tx: kvs.TxID(txid), Key:key, Value: value}
     //var response txPutResponse
-    var response kvs.txPutResponse
+    var response kvs.TxPutResponse
 
     if err := rc.Call("KVService.TxPut", &request, &response); err != nil{
         return false
@@ -115,9 +115,9 @@ func TxPutRPC(rc *rpc.Client, txid string, key, value string) bool{
 //if it fails, client can send txabortrpc - AKA 2 phase commit
 func TxCommitRPC(rc *rpc.Client, txid string, lead bool) bool{
     //request := txCommitRequest{Tx: TxID(txid), Lead: lead}
-    request := kvs.txCommitRequest{Tx: kvs.TxID(txid), Lead: lead}
+    request := kvs.TxCommitRequest{Tx: kvs.TxID(txid), Lead: lead}
     //var response txCommitResponse
-    var response kvs.txCommitResponse
+    var response kvs.TxCommitResponse
     if err := rc.Call("KVService.TxCommit", &request, &response); err !=nil{
         return false
     }
@@ -128,9 +128,9 @@ func TxCommitRPC(rc *rpc.Client, txid string, lead bool) bool{
 
 func TxAbortRPC(rc *rpc.Client, txid string) bool{
     //request := txAbortRequest{Tx: TxID(txid)}
-    request := kvs.txAbortRequest{Tx: kvs.TxID(txid)}
+    request := kvs.TxAbortRequest{Tx: kvs.TxID(txid)}
     //var response txAbortResponse
-    var response kvs.txAbortResponse
+    var response kvs.TxAbortResponse
     if err := rc.Call("KVService.TxAbort", &request, &response); err != nil{
         return false
     }
