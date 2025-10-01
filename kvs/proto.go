@@ -14,7 +14,7 @@ type Content struct {
 	Value string
 }
 
-func (c *Content) setContent(newValue string) {
+func (c *Content) SetContent(newValue string) {
 	c.Value = newValue
 }
 
@@ -61,8 +61,8 @@ type TxID string
 //PRE LOCK
 type lockMode string
 const (
-	lock_S lockMode = "S"
-	lock_X lockMode = "X"
+	Lock_S lockMode = "S"
+	Lock_X lockMode = "X"
 )
 
 type TxLockItem struct {

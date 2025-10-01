@@ -46,7 +46,13 @@ func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatc
 	for i, op := range request.Ops {
 		if op.IsRead {
 			if v, ok := kv.mp.Load(op.Key); ok {
-				response.Values[i] = v.(string)
+				switch valueVal:= v.(type){
+				case string:
+					response.Values[i] = valueVal
+				case *kvs.Content:
+					response.Values[i]= valueVal.Value
+				}
+				//response.Values[i] = v.(string)
 			}
 			//kv.stats.gets.Add(1)
 			localGets++
@@ -107,9 +113,16 @@ func NewKVService() *KVService {
 //exist , one will be created and will store it in the sync map
 func (kv *KVService) getOrCreateCommitt(key string) *kvs.Content{
 	if v, ok := kv.mp.Load(key); ok {
-        if c, ok2 := v.(*kvs.Content); ok2 {
+		switch valueVal := v.(type){
+		case *kvs.Content:
+			return valueVal
+		case string:
+			c:= &kvs.Content{Order: len(kv.ordMtx), Value: valueVal}
+			kv.mp.Store(key,c)
+			kv.ordMtx= append(kv.ordMtx,c)
 			return c
-        }
+		}
+        
 		/*
         if s, ok := v.(string); ok {
             c := &kvs.Content{Order: len(kv.ordMtx), Value: s}
@@ -118,10 +131,9 @@ func (kv *KVService) getOrCreateCommitt(key string) *kvs.Content{
             return c
         }*/
     }
-
-    c := &kvs.Content{Order: len(kv.ordMtx)}
-    kv.mp.Store(key, c)
-    kv.ordMtx = append(kv.ordMtx, c)
+	c:= &kvs.Content{Order: len(kv.ordMtx)}
+	kv.mp.Store(key,c)
+	kv.ordMtx = append(kv.ordMtx,c)
 	return c
 }
 
@@ -206,7 +218,7 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 		return nil
 	}*/
 
-	if value, found := kv.mp.Load(request.Key); ok {
+	if value, ok := kv.mp.Load(request.Key); ok {
 		switch valueVal := value.(type){
 		case string:
 			response.Value = valueVal
@@ -218,6 +230,7 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 
 	return nil
 }
+
 
 func (kv *KVService) GetNewOrder() int {
 	return len(kv.ordMtx)
@@ -273,7 +286,7 @@ func (kv *KVService) TxGet( request *kvs.TxGetRequest, response *kvs.TxGetRespon
 	return nil
 }
 
-func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.TxPutRequest)error{
+func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.TxPutResponse)error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	state:= kv.getOrCreateTxState(string(request.Tx))
@@ -286,6 +299,8 @@ func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.TxPutRequest
 	return nil
 }
 
+
+
 func (kv *KVService) TxCommit(request *kvs.TxCommitRequest, response *kvs.TxCommitResponse)error{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -297,8 +312,8 @@ func (kv *KVService) TxCommit(request *kvs.TxCommitRequest, response *kvs.TxComm
 
 	for k,v:= range state.writes{
 		c:= kv.getOrCreateCommitt(k)
-		c.Lock(v)
-		c.setContent(v)
+		c.Lock()
+		c.SetContent(v)
 		c.Unlock()
 	}
 	kv.txCleanUp(string(request.Tx))
@@ -324,8 +339,8 @@ func (kv *KVService) TxPrepare( request *kvs.TxPrepareRequest, response *kvs.TxP
 	defer kv.mu.Unlock()
 
 	for _, item := range request.Items{
-		if item.Mode == kvs.lock_X{
-			if !kv.try_X(request.Tx, item.Key){
+		if item.Mode == kvs.Lock_X{
+			if !kv.try_X(string(request.Tx), item.Key){
 				kv.txCleanUp(string(request.Tx))
 				response.Ok = false
 				return nil
