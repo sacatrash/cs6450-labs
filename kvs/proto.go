@@ -2,10 +2,33 @@ package kvs
 
 import "sync"
 
+const (
+	READ   = 0
+	WRITE  = 1
+	COMMIT = 2
+	ABORT  = 3
+)
+
 type Op struct {
-	Key string
+	Key   string
 	Value string
-	IsRead bool
+	Type  int //READ, WRITE, COMMIT, ABORT
+}
+
+func (o *Op) IsRead() bool {
+	return o.Type == READ
+}
+
+func (o *Op) IsWrite() bool {
+	return o.Type == WRITE
+}
+
+func (o *Op) IsCommit() bool {
+	return o.Type == COMMIT
+}
+
+func (o *Op) IsAbort() bool {
+	return o.Type == ABORT
 }
 
 type Content struct {
@@ -19,7 +42,6 @@ func (c *Content) SetContent(newValue string) {
 }
 
 type Request struct {
-
 }
 
 type Response struct {
@@ -28,7 +50,7 @@ type Response struct {
 
 type PutRequest struct {
 	Request
-	Key string
+	Key   string
 	Value string
 }
 
@@ -46,7 +68,6 @@ type GetResponse struct {
 	Value string
 }
 
-
 /*
 type LockRequest struct {
 	locks []*sync.Mutex
@@ -58,73 +79,76 @@ type LockRequest struct {
 
 type TxID string
 
-//PRE LOCK
+// PRE LOCK
 type LockMode string
+
 const (
 	Lock_S LockMode = "S"
 	Lock_X LockMode = "X"
 )
 
 type TxLockItem struct {
-	Key string
+	Key  string
 	Mode LockMode
 }
-//these prepares are to preacquire s/x locks in a single ordered way
-type TxPrepareResponse struct{
+
+// these prepares are to preacquire s/x locks in a single ordered way
+type TxPrepareResponse struct {
 	Response
 }
 
-type TxPrepareRequest struct{
+type TxPrepareRequest struct {
 	Request
-	Tx TxID
+	Tx    TxID
 	Items []TxLockItem
 }
+
 /*
-type Transaction struct {
-	//req Request
-	Key string
-	op Op
-	time Time
-}
+	type Transaction struct {
+		//req Request
+		Key string
+		op Op
+		time Time
+	}
 */
-type TxGetResponse struct{
+type TxGetResponse struct {
 	Response
-    //ok bool
-    Value string
+	//ok bool
+	Value string
 }
 
-type TxGetRequest struct{
+type TxGetRequest struct {
 	Request
-    Tx TxID
-    Key string
+	Tx  TxID
+	Key string
 }
 
-type TxCommitRequest struct{
+type TxCommitRequest struct {
 	Request
-    Tx TxID
-    Lead bool
+	Tx   TxID
+	Lead bool
 }
 
-type TxCommitResponse struct{
-	Response
-}
-
-type TxPutRequest struct{
-	Request
-    Tx TxID
-    Key string
-    Value string
-}
-
-type TxPutResponse struct{
+type TxCommitResponse struct {
 	Response
 }
 
-type TxAbortRequest struct{
+type TxPutRequest struct {
 	Request
-    Tx TxID
+	Tx    TxID
+	Key   string
+	Value string
 }
 
-type TxAbortResponse struct{
+type TxPutResponse struct {
+	Response
+}
+
+type TxAbortRequest struct {
+	Request
+	Tx TxID
+}
+
+type TxAbortResponse struct {
 	Response
 }

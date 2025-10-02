@@ -48,7 +48,7 @@ func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatc
 	var localGets, localPuts uint64
 
 	for i, op := range request.Ops {
-		if op.IsRead {
+		if op.IsRead() {
 			if v, ok := kv.mp.Load(op.Key); ok {
 				switch valueVal := v.(type) {
 				case string:
@@ -61,7 +61,7 @@ func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatc
 			//kv.stats.gets.Add(1)
 			localGets++
 
-		} else {
+		} else if op.IsWrite() {
 			kv.mp.Store(op.Key, op.Value)
 			//kv.stats.puts.Add(1)
 			localPuts++

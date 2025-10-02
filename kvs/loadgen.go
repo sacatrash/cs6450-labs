@@ -3,6 +3,8 @@ package kvs
 import (
 	"math"
 	"math/rand/v2"
+	"strconv"
+	"strings"
 )
 
 type Workload struct {
@@ -41,15 +43,11 @@ func NewWorkload(name string, theta float64) *Workload {
 	return workload
 }
 
-type WorkloadOp struct {
-	Key    uint64 // Key for the operation.
-	IsRead bool   // True if this is a read operation, false for write.
-}
-
-func (w *Workload) Next() WorkloadOp {
+func (w *Workload) Next() []Op {
 	key := w.keygen.Uint64() % w.records
 	isRead := w.gen.Uint64() < w.readThreshold
-	return WorkloadOp{Key: key, IsRead: isRead}
+	value := strings.Repeat("x", 128)
+	return [Op{Key: strconv.FormatUint(key, 10), Value: value, IsRead: isRead}]
 }
 
 // Taken from Wikipedia.
@@ -143,4 +141,26 @@ func zeta(n uint64, theta float64) float64 {
 		sum = sum + 1.0/(math.Pow(float64(i+1), theta))
 	}
 	return sum
+}
+
+func (w *AccountingWorkload) Next() []Op {
+	key := w.keygen.Uint64() % w.records
+	isRead := w.gen.Uint64() < w.readThreshold
+	value := strings.Repeat("x", 128)
+	return Op{Key: strconv.FormatUint(key, 10), Value: value, IsRead: isRead}
+}
+
+type AccountingWorkload struct {
+	records    uint64  // Number of records in the key-value store.
+	initAmt    float32 //init bank account amount
+	checkState bool    //if true, check state
+}
+
+func NewAccountingWorkload() *AccountingWorkload {
+	workload := &AccountingWorkload{
+		records:    10, // Default number of accounts.
+		initAmt:    1000,
+		checkState: false,
+	}
+	return workload
 }

@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/rpc"
 	"sort"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -15,12 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
-
-type TxOperation struct {
-	IsRead bool
-	Key    string
-	Value  string
-}
 
 type txParticipant map[int]bool
 
@@ -44,14 +37,14 @@ func hashKey(s string) uint32 {
 	return h.Sum32()
 }
 
-func strongestModes(ops []TxOperation) map[string]kvs.LockMode {
+func strongestModes(ops []kvs.Op) map[string]kvs.LockMode {
 	m := map[string]kvs.LockMode{}
 	for _, op := range ops {
-		if op.IsRead {
+		if op.IsRead() {
 			if _, ok := m[op.Key]; !ok {
 				m[op.Key] = kvs.Lock_S
 			}
-		} else {
+		} else if op.IsWrite() {
 			m[op.Key] = kvs.Lock_X
 		}
 	}
@@ -62,7 +55,7 @@ func shardForKey(key string, n int) int {
 	return int(hashKey(key) % uint32(n))
 }
 
-func runTxn3(hosts []*perHost, txid string, ops []TxOperation) (bool, int) {
+func runTxn3(hosts []*perHost, txid string, ops []kvs.Op) (bool, int) {
 	//we need to prepare the build , sort, txprepare for shard etc
 	modes := strongestModes(ops)
 	type item struct {
@@ -114,14 +107,14 @@ func runTxn3(hosts []*perHost, txid string, ops []TxOperation) (bool, int) {
 	}
 	for _, op := range ops {
 		sh := shardForKey(op.Key, len(hosts))
-		if op.IsRead {
+		if op.IsRead() {
 			if _, ok := TxGetRPC(hosts[sh].c.rpcClient, txid, op.Key); !ok {
 				for p := range participants {
 					_ = TxAbortRPC(hosts[p].c.rpcClient, txid)
 				}
 				return false, 0
 			}
-		} else {
+		} else if op.IsWrite() {
 			if !TxPutRPC(hosts[sh].c.rpcClient, txid, op.Key, op.Value) {
 				for p := range participants {
 					_ = TxAbortRPC(hosts[p].c.rpcClient, txid)
@@ -285,7 +278,6 @@ func runClient(id int, addrs []string, done *atomic.Bool, workload *kvs.Workload
 		*/
 	}
 
-	value := strings.Repeat("x", 128)
 	/*
 		flushOne := func(h *perHost) {
 			if len(h.active) == 0 { return }
@@ -304,15 +296,24 @@ func runClient(id int, addrs []string, done *atomic.Bool, workload *kvs.Workload
 			}
 		}
 	*/
+
+	//TODO: modify to support manual abort/commit
 	for !done.Load() {
-		var txops []TxOperation
-		for i := 0; i < 3; i++ {
-			op := workload.Next()
-			key := strconv.FormatUint(op.Key, 10)
-			if op.IsRead {
-				txops = append(txops, TxOperation{IsRead: true, Key: key})
-			} else {
-				txops = append(txops, TxOperation{IsRead: false, Key: key, Value: value})
+		var txops []kvs.Op
+		ops := workload.Next()
+		op := kvs.Op{}
+		for i := 0; i < len(ops); i++ {
+			op = ops[i]
+
+			txops = append(txops, op)
+
+			if op.Type == kvs.ABORT || op.Type == kvs.COMMIT {
+
+			}
+			if len(txops) >= 3 {
+				//if 3 pending actions, commit
+				op = kvs.Op{Type: kvs.COMMIT}
+				txops = append(txops, op)
 			}
 		}
 		txid := uuid.New().String()
