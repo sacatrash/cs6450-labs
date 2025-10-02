@@ -59,15 +59,15 @@ type LockRequest struct {
 type TxID string
 
 //PRE LOCK
-type lockMode string
+type LockMode string
 const (
-	Lock_S lockMode = "S"
-	Lock_X lockMode = "X"
+	Lock_S LockMode = "S"
+	Lock_X LockMode = "X"
 )
 
 type TxLockItem struct {
 	Key string
-	Mode lockMode
+	Mode LockMode
 }
 //these prepares are to preacquire s/x locks in a single ordered way
 type TxPrepareResponse struct{
