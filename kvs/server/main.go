@@ -18,6 +18,8 @@ import (
 type Stats struct {
 	puts *atomic.Uint64
 	gets *atomic.Uint64
+	commits *atomic.Uint64
+	aborts *atomic.Uint64
 }
 
 type keyLock struct{
@@ -35,6 +37,8 @@ type txState struct{
 func (s *Stats) Init() {
 	s.puts = new(atomic.Uint64)
 	s.gets = new(atomic.Uint64)
+	s.commits = new(atomic.Uint64)
+	s.aborts = new(atomic.Uint64)
 }
 
 func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatch) error {
@@ -72,8 +76,12 @@ func (s *Stats) Sub(prev *Stats) Stats {
 	r := Stats{}
 	r.puts = new(atomic.Uint64)
 	r.gets = new(atomic.Uint64)
+	r.commits = new(atomic.Uint64)
+	r.aborts = new(atomic.Uint64)
 	r.puts.Store(s.puts.Load() - prev.puts.Load())
 	r.gets.Store(s.gets.Load() - prev.gets.Load())
+	r.commits.Store(s.commits.Load() - prev.commits.Load())
+	r.aborts.Store(s.aborts.Load() - prev.aborts.Load())
 	return r
 }
 
@@ -317,6 +325,7 @@ func (kv *KVService) TxCommit(request *kvs.TxCommitRequest, response *kvs.TxComm
 		c.Unlock()
 	}
 	kv.txCleanUp(string(request.Tx))
+	kv.stats.commits.Add(1)
 	response.Ok = true
 	return nil
 }
@@ -328,6 +337,7 @@ func (kv *KVService) TxAbort(request *kvs.TxAbortRequest, response *kvs.TxAbortR
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	kv.txCleanUp(string(request.Tx))
+	kv.stats.aborts.Add(1)
 	response.Ok = true
 	return nil 
 }
@@ -368,6 +378,8 @@ func (kv *KVService) printStats() {
 	kv.prevStats.Init()
 	kv.prevStats.gets.Store(stats.gets.Load())
 	kv.prevStats.puts.Store(stats.puts.Load())
+	kv.prevStats.commits.Store(stats.commits.Load())
+	kv.prevStats.aborts.Store(stats.aborts.Load())
 	now := time.Now()
 	lastPrint := kv.lastPrint
 	kv.lastPrint = now
@@ -378,11 +390,15 @@ func (kv *KVService) printStats() {
 
 	gets := diff.gets.Load()
 	puts := diff.puts.Load()
+	commits := diff.commits.Load()
+	aborts := diff.aborts.Load()
 
-	fmt.Printf("get/s %0.2f\nput/s %0.2f\nops/s %0.2f\n\n",
+	fmt.Printf("get/s %0.2f\nput/s %0.2f\nops/s %0.2f\ncommits/s %0.2f\naborts/s %0.2f\n\n",
 		float64(gets)/deltaS,
 		float64(puts)/deltaS,
-		float64(gets+puts)/deltaS)
+		float64(gets+puts)/deltaS,
+		float64(commits)/deltaS,
+		float64(aborts)/deltaS)
 }
 
 func main() {
