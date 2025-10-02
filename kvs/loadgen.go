@@ -5,6 +5,8 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"strings"
+
+	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
 type Workload struct {
@@ -43,7 +45,7 @@ func NewWorkload(name string, theta float64) *Workload {
 	return workload
 }
 
-func (w *Workload) Next() []Op {
+func (w *Workload, data *interface{Get()}) Next() []Op {
 	key := w.keygen.Uint64() % w.records
 	isRead := w.gen.Uint64() < w.readThreshold
 	value := strings.Repeat("x", 128)
@@ -143,24 +145,42 @@ func zeta(n uint64, theta float64) float64 {
 	return sum
 }
 
-func (w *AccountingWorkload) Next() []Op {
+func (w *AccountingWorkload, data *interface{Get()}) Next() []Op {
 	key := w.keygen.Uint64() % w.records
 	isRead := w.gen.Uint64() < w.readThreshold
 	value := strings.Repeat("x", 128)
-	return Op{Key: strconv.FormatUint(key, 10), Value: value, IsRead: isRead}
+	switch(w.state) {
+	case 0:
+		//we need the account balance
+		w.state = 1
+		return [Op{Key: strconv.FormatUint(w.currentAcct, 10), Type: kvs.READ}]
+	case 1:
+		//check balance, abort if not enough
+		bal := kvs.GetResponse(data.Get()).value
+		if(bal < 100) {
+			return [Op{Key: strconv.FormatUint(w.currentAcct, 10), Type: kvs.ABORT}]
+		}
+
+
+	}
+	
 }
 
 type AccountingWorkload struct {
 	records    uint64  // Number of records in the key-value store.
 	initAmt    float32 //init bank account amount
-	checkState bool    //if true, check state
+	state int //0=get src, 1=get dst, 2=put src and dst, 3=check (uses dstAcct to keep track)
+	srcAcct int
+	dstAcct int
 }
 
-func NewAccountingWorkload() *AccountingWorkload {
+func NewAccountingWorkload(id int, acctNum int) *AccountingWorkload {
 	workload := &AccountingWorkload{
-		records:    10, // Default number of accounts.
+		records:    acctNum, // Default number of accounts.
 		initAmt:    1000,
 		checkState: false,
+		srcAcct: id,
+		dstAcct: (id+1)%acctNum
 	}
 	return workload
 }

@@ -112,15 +112,13 @@ type TxPrepareRequest struct {
 	}
 */
 type TxGetResponse struct {
-	Response
+	GetResponse
 	//ok bool
-	Value string
 }
 
 type TxGetRequest struct {
-	Request
-	Tx  TxID
-	Key string
+	GetRequest
+	Tx TxID
 }
 
 type TxCommitRequest struct {
@@ -134,14 +132,12 @@ type TxCommitResponse struct {
 }
 
 type TxPutRequest struct {
-	Request
-	Tx    TxID
-	Key   string
-	Value string
+	PutRequest
+	Tx TxID
 }
 
 type TxPutResponse struct {
-	Response
+	PutResponse
 }
 
 type TxAbortRequest struct {
