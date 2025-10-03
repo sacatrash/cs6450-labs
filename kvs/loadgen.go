@@ -1,6 +1,7 @@
 package kvs
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"strconv"
@@ -159,50 +160,67 @@ type AccountingWorkload struct {
 	dstAcct string
 }
 
-func NewAccountingWorkload(id uint64, acctNum uint64, maxI int) *AccountingWorkload {
+func NewAccountingWorkload(id uint64, acctNum uint64, init float64, maxI int) *AccountingWorkload {
 	workload := &AccountingWorkload{
 		records: acctNum, // Default number of accounts.
-		initAmt: 1000,
-		srcAcct: strconv.FormatInt(id, 10),
-		dstAcct: strconv.FormatInt((id + 1) % acctNum, 10),
+		initAmt: init,
+		srcAcct: strconv.FormatUint(id, 10),
+		dstAcct: strconv.FormatUint((id+1)%acctNum, 10),
 		maxIter: maxI,
 		txnCtr:  (rand.Int() % maxI) + 1,
 	}
 	return workload
 }
 
-//returns true if txn was successful/didn't abort
+// returns true if txn was successful/didn't abort
 func (w *AccountingWorkload) Next(client *ClientTxnRpc) bool {
 
-	if(w.txnCtr > 0) {
+	if w.txnCtr > 0 {
+		defer func() { w.txnCtr-- }()
 		//check balance, abort if not enough
-			
-			srcBal, _ = strconv.ParseFloat(<- client.GetTxnRPC(w.srcAcct), 32)
-			dstBal, _ = strconv.ParseFloat(<- client.GetTxnRPC(w.dstAcct), 32)
-			if w.srcBal < 100 {
-				w.state = 0
+		srcBalGet := <-(*client).GetTxnRPC(w.srcAcct)
+
+		srcBal, ok1 := strconv.ParseFloat(srcBalGet.Get(), 64)
+
+		if ok1 != nil || (!srcBalGet.IsOk()) || srcBal < 100 {
+			<-(*client).AbortTxnRPC()
+			return false
+		}
+		dstBalGet := <-(*client).GetTxnRPC(w.dstAcct)
+		dstBal, ok2 := strconv.ParseFloat(dstBalGet.Get(), 64)
+
+		//transfer balance src->dst
+		ok3 := (<-(*client).PutTxnRPC(w.srcAcct, strconv.FormatFloat(srcBal-100, 'f', -1, 64))).IsOk()
+		ok4 := (<-(*client).PutTxnRPC(w.dstAcct, strconv.FormatFloat(dstBal+100, 'f', -1, 64))).IsOk()
+
+		if ok3 && ok4 && ok2 == nil && dstBalGet.IsOk() {
+			<-(*client).CommitTxnRPC()
+			return true
+		} else {
+			<-(*client).AbortTxnRPC()
+			return false
+		}
+	} else {
+		defer func() { w.txnCtr = (rand.Int() % w.maxIter) }()
+		fmt.Print("ASSERT CHECK... ")
+		var i uint64
+		var total float64
+		for i = 0; i < uint64(w.records); i++ {
+			v := <-(*client).GetTxnRPC(strconv.FormatUint(i, 10))
+			if v.IsOk() {
+				tmp, _ := strconv.ParseFloat(v.Get(), 64)
+				total += tmp
+			} else {
+				<-(*client).AbortTxnRPC()
 				return false
 			}
-			//transfer balance src->dst
-			w.dstBal, _ = strconv.ParseFloat(dst.Get(), 32)
-			w.state = 0
-			return []Op{
-				{Key: string(w.srcAcct), Value: strconv.FormatFloat(w.srcBal-100, 'f', -1, 64)},
-				{Key: string(w.dstAcct), Value: strconv.FormatFloat(w.dstBal+100, 'f', -1, 64)},
-				{Type: COMMIT}}
-
-	
-		//check phase
-		if w.dstAcct != w.srcAcct {
-
-		} else {
-			w.state = 0
-
 		}
-	}
-	else {
+		expected := w.initAmt * float64(w.records)
+		if total != expected {
+			fmt.Printf("ASSERT FAILED: expected total %f actual total %f.\n\n", expected, total)
+		}
 
+		return (<-(*client).CommitTxnRPC()).IsOk()
 	}
 
-	}
 }

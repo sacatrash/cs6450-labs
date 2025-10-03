@@ -1,9 +1,7 @@
 package kvs
 
 import (
-	"net/rpc"
 	"sync"
-	"time"
 )
 
 const (
@@ -53,11 +51,11 @@ type ResponseInterface interface {
 }
 
 type Response struct {
-	Ok bool
+	Error error
 }
 
 func (r Response) IsOk() bool {
-	return r.Ok
+	return r.Error == nil
 }
 
 type DataResponse interface {
@@ -74,6 +72,10 @@ type PutResponse struct {
 	Response
 }
 
+func (r PutResponse) IsOk() bool {
+	return r.Response.IsOk()
+}
+
 type GetRequest struct {
 	Request
 	Key string
@@ -82,6 +84,10 @@ type GetRequest struct {
 type GetResponse struct {
 	Response
 	Value string
+}
+
+func (r GetResponse) IsOk() bool {
+	return r.Response.IsOk()
 }
 
 func (r GetResponse) Get() string {
@@ -123,24 +129,6 @@ type TxPrepareRequest struct {
 	Items []TxLockItem
 }
 
-/*
-	type Transaction struct {
-		//req Request
-		Key string
-		op Op
-		time Time
-	}
-*/
-type TxGetResponse struct {
-	GetResponse
-	//ok bool
-}
-
-type TxGetRequest struct {
-	GetRequest
-	Tx TxID
-}
-
 type TxCommitRequest struct {
 	Request
 	Tx   TxID
@@ -151,13 +139,8 @@ type TxCommitResponse struct {
 	Response
 }
 
-type TxPutRequest struct {
-	PutRequest
-	Tx TxID
-}
-
-type TxPutResponse struct {
-	PutResponse
+func (r TxCommitResponse) IsOk() bool {
+	return r.Response.IsOk()
 }
 
 type TxAbortRequest struct {
@@ -169,40 +152,25 @@ type TxAbortResponse struct {
 	Response
 }
 
+func (r TxAbortResponse) IsOk() bool {
+	return r.Response.IsOk()
+}
+
+// generic interface to handle the RPC of an Op
+type GenericRpc interface {
+	doRPC(op *Op) any
+}
+
 //client related types
-
-type txParticipant map[int]bool
-
-type ServerClientConn struct {
-	rpcClient *rpc.Client
-	Dest      string
-	active    []Op
-	spare     []Op
-	deadline  time.Time
-	sendq     chan []Op
-}
-
-type Client struct {
-	Hosts []*ServerClientConn
-	Name  string
-}
-
-type TxnClient struct {
-	Client
-	TxnID int
-}
 
 // Interfaces define the types of RPCs which clients can send
 type ClientRpc interface {
 	GetRPC(key string) chan GetResponse
 	PutRPC(key string, val string) chan PutResponse
-	BatchRPC(ops []Op) chan ResponseBatch
 	ShouldBatchRPCs() bool //if true, batches RPCs when Get/Put called instead of calling outright
 }
 
 type ClientTxnRpc interface {
-	GetTxnRPC(key string) chan TxGetResponse
-	PutTxnRPC(key string, val string) chan TxPutResponse
 	AbortTxnRPC() chan TxAbortResponse
 	CommitTxnRPC() chan TxCommitResponse
 }
