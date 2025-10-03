@@ -147,20 +147,18 @@ type LockRequest struct {
 
 /*NEW WORKLOAD TRANSACTION RPC (REMOTE PROCEDURE CALLS) REQUEST AND RESPONSE STRUCTS */
 
-type TxID struct {
-	string
-}
+type TxID string
 
 func (t TxID) IsValid() bool {
-	return t.string != ""
+	return t != ""
 }
 
 func (t TxID) Invalidate() {
-	t.string = ""
+	t = ""
 }
 
 func (t TxID) SetNew(id string) {
-	t.string = id
+	t = TxID(id)
 }
 
 // PRE LOCK

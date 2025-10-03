@@ -26,32 +26,32 @@ func (cli TxnClient) doRPC(op *kvs.Op) any {
 
 	switch op.Type {
 	case kvs.READ:
-		tmp := kvs.TxGetRequest{Tx: cli.TxnID}
+		tmp := &kvs.TxGetRequest{Tx: cli.TxnID}
 		tmp.Key = op.Key
 		request = tmp
-		response = kvs.TxGetResponse{}
+		response = &kvs.TxGetResponse{}
 		rpcStr = "KVService.TxGet"
 	case kvs.WRITE:
-		tmp := kvs.TxPutRequest{Tx: cli.TxnID}
+		tmp := &kvs.TxPutRequest{Tx: cli.TxnID}
 		tmp.Key = op.Key
 		tmp.Value = op.Value
-		response = kvs.PutResponse{}
+		response = &kvs.PutResponse{}
 		rpcStr = "KVService.TxPut"
 	case kvs.COMMIT:
-		request = kvs.TxCommitRequest{Tx: cli.TxnID}
-		response = kvs.TxCommitResponse{}
+		request = &kvs.TxCommitRequest{Tx: cli.TxnID}
+		response = &kvs.TxCommitResponse{}
 		rpcStr = "KVService.TxCommit"
 	case kvs.ABORT:
-		request = kvs.TxCommitRequest{Tx: cli.TxnID}
-		response = kvs.TxCommitResponse{}
+		request = &kvs.TxCommitRequest{Tx: cli.TxnID}
+		response = &kvs.TxCommitResponse{}
 		rpcStr = "KVService.TxAbort"
 	case kvs.BEGIN:
-		request = kvs.TxBeginRequest{Tx: cli.TxnID}
-		response = kvs.TxBeginResponse{}
+		request = &kvs.TxBeginRequest{Tx: cli.TxnID}
+		response = &kvs.TxBeginResponse{}
 		rpcStr = "KVService.TxBegin"
 
 	}
-	err := client.rpcClient.Call(rpcStr, &request, &response)
+	err := client.rpcClient.Call(rpcStr, request, response)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -60,16 +60,25 @@ type KVService struct {
 
 func (kv *KVService) getTx(txid kvs.TxID) (*txState, bool) {
 	tmp, err := kv.txs.Load(txid)
+	if !err {
+		return nil, err
+	}
 	return tmp.(*txState), err
 }
 
 func (tx *txState) getSLockFromKey(key string) (*keyLock, bool) {
 	tmp, err := tx.s_held.Load(key)
+	if !err {
+		return nil, err
+	}
 	return tmp.(*keyLock), err
 }
 
 func (tx *txState) getXLockFromKey(key string) (*keyLock, bool) {
 	tmp, err := tx.x_held.Load(key)
+	if !err {
+		return nil, err
+	}
 	return tmp.(*keyLock), err
 }
 

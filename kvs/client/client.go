@@ -60,14 +60,14 @@ func (cli Client) doRPC(op *kvs.Op) any {
 
 	switch op.Type {
 	case kvs.READ:
-		request = kvs.GetRequest{Key: op.Key}
-		response = kvs.GetResponse{}
+		request = &kvs.GetRequest{Key: op.Key}
+		response = &kvs.GetResponse{}
 		rpcStr = "KVService.Get"
 
 		break
 	case kvs.WRITE:
-		request = kvs.PutRequest{Key: op.Key, Value: op.Value}
-		response = kvs.PutResponse{}
+		request = &kvs.PutRequest{Key: op.Key, Value: op.Value}
+		response = &kvs.PutResponse{}
 		rpcStr = "KVService.Put"
 		break
 	case kvs.COMMIT:
@@ -76,7 +76,7 @@ func (cli Client) doRPC(op *kvs.Op) any {
 		panic("Client doesn't support ABORT, use TxnClient")
 
 	}
-	err := client.rpcClient.Call(rpcStr, &request, &response)
+	err := client.rpcClient.Call(rpcStr, request, response)
 	if err != nil {
 		log.Fatal(err)
 	}
