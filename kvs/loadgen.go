@@ -45,14 +45,14 @@ func NewWorkload(name string, theta float64) *Workload {
 
 // processes a workload, returning a list of operations to perform.
 // data is of type Response, consisting of the prior operations' response.
-func (w *Workload) Next(client *ClientRpc) {
+func (w *Workload) Next(client *ClientRpc) bool {
 	key := strconv.FormatUint(w.keygen.Uint64()%w.records, 10)
 	isRead := w.gen.Uint64() < w.readThreshold
 	value := strings.Repeat("x", 128)
 	if isRead {
-		go (*client).GetRPC(key)
+		return (<-(*client).GetRPC(key)).IsOk()
 	} else {
-		go (*client).PutRPC(key, value)
+		return (<-(*client).PutRPC(key, value)).IsOk()
 	}
 
 }
@@ -153,40 +153,35 @@ func zeta(n uint64, theta float64) float64 {
 type AccountingWorkload struct {
 	records uint64  // Number of records in the key-value store.
 	initAmt float64 //init bank account amount
-	state   int     //1=get dst and src, 1=put src and dst, 2=check (uses dstAcct to keep track)
 	txnCtr  int     //keep track of num ops. Sets to a random value and decrements to 0, at which a check is performed
 	maxIter int
-	srcAcct uint64
-	dstAcct uint64
-	srcBal  float64
-	dstBal  float64
+	srcAcct string
+	dstAcct string
 }
 
 func NewAccountingWorkload(id uint64, acctNum uint64, maxI int) *AccountingWorkload {
 	workload := &AccountingWorkload{
 		records: acctNum, // Default number of accounts.
 		initAmt: 1000,
-		srcAcct: id,
-		dstAcct: (id + 1) % acctNum,
-		srcBal:  0,
-		dstBal:  1,
+		srcAcct: strconv.FormatInt(id, 10),
+		dstAcct: strconv.FormatInt((id + 1) % acctNum, 10),
 		maxIter: maxI,
 		txnCtr:  (rand.Int() % maxI) + 1,
 	}
 	return workload
 }
 
-func (w *AccountingWorkload) Next(client *ClientTxnRpc) {
+//returns true if txn was successful/didn't abort
+func (w *AccountingWorkload) Next(client *ClientTxnRpc) bool {
 
-		//we need the account balance
-		w.state = 1
-		return []Op{{Key: strconv.FormatUint(w.srcAcct, 10), Type: READ},
-			{Key: string(w.dstAcct), Type: READ}}
+	if(w.txnCtr > 0) {
 		//check balance, abort if not enough
-			w.srcBal, _ = strconv.ParseFloat(src.Get(), 32)
+			
+			srcBal, _ = strconv.ParseFloat(<- client.GetTxnRPC(w.srcAcct), 32)
+			dstBal, _ = strconv.ParseFloat(<- client.GetTxnRPC(w.dstAcct), 32)
 			if w.srcBal < 100 {
 				w.state = 0
-				return []Op{{Type: ABORT}}
+				return false
 			}
 			//transfer balance src->dst
 			w.dstBal, _ = strconv.ParseFloat(dst.Get(), 32)
@@ -204,6 +199,10 @@ func (w *AccountingWorkload) Next(client *ClientTxnRpc) {
 			w.state = 0
 
 		}
+	}
+	else {
+
+	}
 
 	}
 }

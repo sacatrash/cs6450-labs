@@ -194,15 +194,15 @@ type TxnClient struct {
 
 // Interfaces define the types of RPCs which clients can send
 type ClientRpc interface {
-	GetRPC(key string) GetResponse
-	PutRPC(key string, val string) PutResponse
-	BatchRPC(ops []Op) ResponseBatch
+	GetRPC(key string) chan GetResponse
+	PutRPC(key string, val string) chan PutResponse
+	BatchRPC(ops []Op) chan ResponseBatch
 	ShouldBatchRPCs() bool //if true, batches RPCs when Get/Put called instead of calling outright
 }
 
 type ClientTxnRpc interface {
-	GetTxnRPC(key string) TxGetResponse
-	PutTxnRPC(key string, val string) TxPutResponse
-	AbortTxnRPC() TxAbortResponse
-	CommitTxnRPC() TxCommitResponse
+	GetTxnRPC(key string) chan TxGetResponse
+	PutTxnRPC(key string, val string) chan TxPutResponse
+	AbortTxnRPC() chan TxAbortResponse
+	CommitTxnRPC() chan TxCommitResponse
 }
