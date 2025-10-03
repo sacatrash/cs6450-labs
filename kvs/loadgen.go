@@ -20,6 +20,11 @@ type Workload struct {
 	keygen        *ZipfianGenerator // Generator for record selection.
 }
 
+// same as Workload but supports transaction interface
+type TxnDefaultWorkload struct {
+	Workload
+}
+
 func NewWorkload(name string, theta float64) *Workload {
 	gen := NewXorshift64(rand.Uint64())
 	workload := &Workload{
@@ -60,6 +65,28 @@ func (w *Workload) Next(client ClientRpc) bool {
 		return (<-client.PutRPC(key, value)).IsOk()
 	}
 
+}
+
+// same as above but using transactions instead
+func (w *TxnDefaultWorkload) Next(client ClientTxnRpc) bool {
+	for i := 0; i < 3; i++ {
+		key := strconv.FormatUint(w.keygen.Uint64()%w.records, 10)
+		isRead := w.gen.Uint64() < w.readThreshold
+		value := strings.Repeat("x", 128)
+		var res Response
+		if isRead {
+			res = (<-client.GetTxnRPC(key)).Response
+		} else {
+			res = (<-client.PutTxnRPC(key, value)).Response
+		}
+
+		if !res.IsOk() {
+			//RunClient aborts when returning false
+			return false
+		}
+	}
+	<-client.BeginTxnRPC()
+	return true
 }
 
 // Taken from Wikipedia.
