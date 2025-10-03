@@ -35,6 +35,7 @@ func (cli TxnClient) doRPC(op *kvs.Op) any {
 		tmp := &kvs.TxPutRequest{Tx: cli.TxnID}
 		tmp.Key = op.Key
 		tmp.Value = op.Value
+		request = tmp
 		response = &kvs.PutResponse{}
 		rpcStr = "KVService.TxPut"
 	case kvs.COMMIT:
