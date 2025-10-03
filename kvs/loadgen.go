@@ -43,13 +43,18 @@ func NewWorkload(name string, theta float64) *Workload {
 	return workload
 }
 
-//processes a workload, returning a list of operations to perform.
-//data is of type Response, consisting of the prior operations' response.
-func (w *Workload) Next(data []*Response) []Op {
-	key := w.keygen.Uint64() % w.records
+// processes a workload, returning a list of operations to perform.
+// data is of type Response, consisting of the prior operations' response.
+func (w *Workload) Next(client *ClientRpc) {
+	key := strconv.FormatUint(w.keygen.Uint64()%w.records, 10)
 	isRead := w.gen.Uint64() < w.readThreshold
 	value := strings.Repeat("x", 128)
-	return []Op{{Key: strconv.FormatUint(key, 10), Value: value, IsRead: isRead}}
+	if isRead {
+		go (*client).GetRPC(key)
+	} else {
+		go (*client).PutRPC(key, value)
+	}
+
 }
 
 // Taken from Wikipedia.
@@ -147,13 +152,14 @@ func zeta(n uint64, theta float64) float64 {
 
 type AccountingWorkload struct {
 	records uint64  // Number of records in the key-value store.
-	initAmt float32 //init bank account amount
+	initAmt float64 //init bank account amount
 	state   int     //1=get dst and src, 1=put src and dst, 2=check (uses dstAcct to keep track)
 	txnCtr  int     //keep track of num ops. Sets to a random value and decrements to 0, at which a check is performed
 	maxIter int
 	srcAcct uint64
 	dstAcct uint64
-	srcBal  float32
+	srcBal  float64
+	dstBal  float64
 }
 
 func NewAccountingWorkload(id uint64, acctNum uint64, maxI int) *AccountingWorkload {
@@ -163,44 +169,34 @@ func NewAccountingWorkload(id uint64, acctNum uint64, maxI int) *AccountingWorkl
 		srcAcct: id,
 		dstAcct: (id + 1) % acctNum,
 		srcBal:  0,
-		dstBal: 1,
+		dstBal:  1,
 		maxIter: maxI,
 		txnCtr:  (rand.Int() % maxI) + 1,
 	}
 	return workload
 }
 
-func (w *AccountingWorkload) Next(data []*Response) []Op {
-	//handle the previous response- if failure, abort and retry
-	for ind, elem := range data {
-		if(!elem.Ok) {
-			w.state = 0
-			return []Op{{Type: ABORT}}
-		}
-	}
-	
-	switch w.state {
-	case 0:
+func (w *AccountingWorkload) Next(client *ClientTxnRpc) {
+
 		//we need the account balance
 		w.state = 1
 		return []Op{{Key: strconv.FormatUint(w.srcAcct, 10), Type: READ},
-	{Key: strconv.FormatUnit(w.dstAcct, 10), Type: READ}}
-	case 1:
+			{Key: string(w.dstAcct), Type: READ}}
 		//check balance, abort if not enough
-		w.srcBal = *(GetResponse.(data[0])).value
-		if w.srcBal < 100 {
+			w.srcBal, _ = strconv.ParseFloat(src.Get(), 32)
+			if w.srcBal < 100 {
+				w.state = 0
+				return []Op{{Type: ABORT}}
+			}
+			//transfer balance src->dst
+			w.dstBal, _ = strconv.ParseFloat(dst.Get(), 32)
 			w.state = 0
-			return []Op{{Type: ABORT}}
-		}
-		//transfer balance src->dst
-		dstBal := *(GetResponse.(data[1])).value
-		w.state = 0
-		return []Op{
-			{Key: strconv.FormatUint(w.srcAcct, 10), w.srcBal - 100},
-			{Key: strconv.FormatUint(w.dstAcct, 10), dstBal + 100},
-			{Type: COMMIT}}
+			return []Op{
+				{Key: string(w.srcAcct), Value: strconv.FormatFloat(w.srcBal-100, 'f', -1, 64)},
+				{Key: string(w.dstAcct), Value: strconv.FormatFloat(w.dstBal+100, 'f', -1, 64)},
+				{Type: COMMIT}}
 
-	case 2:
+	
 		//check phase
 		if w.dstAcct != w.srcAcct {
 

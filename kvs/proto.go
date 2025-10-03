@@ -1,6 +1,10 @@
 package kvs
 
-import "sync"
+import (
+	"net/rpc"
+	"sync"
+	"time"
+)
 
 const (
 	READ   = 0
@@ -44,8 +48,20 @@ func (c *Content) SetContent(newValue string) {
 type Request struct {
 }
 
+type ResponseInterface interface {
+	IsOk() bool
+}
+
 type Response struct {
 	Ok bool
+}
+
+func (r Response) IsOk() bool {
+	return r.Ok
+}
+
+type DataResponse interface {
+	Get() string
 }
 
 type PutRequest struct {
@@ -66,6 +82,10 @@ type GetRequest struct {
 type GetResponse struct {
 	Response
 	Value string
+}
+
+func (r GetResponse) Get() string {
+	return r.Value
 }
 
 /*
@@ -147,4 +167,42 @@ type TxAbortRequest struct {
 
 type TxAbortResponse struct {
 	Response
+}
+
+//client related types
+
+type txParticipant map[int]bool
+
+type ServerClientConn struct {
+	rpcClient *rpc.Client
+	Dest      string
+	active    []Op
+	spare     []Op
+	deadline  time.Time
+	sendq     chan []Op
+}
+
+type Client struct {
+	Hosts []*ServerClientConn
+	Name  string
+}
+
+type TxnClient struct {
+	Client
+	TxnID int
+}
+
+// Interfaces define the types of RPCs which clients can send
+type ClientRpc interface {
+	GetRPC(key string) GetResponse
+	PutRPC(key string, val string) PutResponse
+	BatchRPC(ops []Op) ResponseBatch
+	ShouldBatchRPCs() bool //if true, batches RPCs when Get/Put called instead of calling outright
+}
+
+type ClientTxnRpc interface {
+	GetTxnRPC(key string) TxGetResponse
+	PutTxnRPC(key string, val string) TxPutResponse
+	AbortTxnRPC() TxAbortResponse
+	CommitTxnRPC() TxCommitResponse
 }

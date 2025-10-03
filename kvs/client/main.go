@@ -15,22 +15,6 @@ import (
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
-type txParticipant map[int]bool
-
-type perHost struct {
-	c        *Client
-	active   []kvs.Op
-	spare    []kvs.Op
-	deadline time.Time
-	sendq    chan []kvs.Op
-}
-
-type Client struct {
-	rpcClient *rpc.Client
-	Name      string
-	Dest      string
-}
-
 func hashKey(s string) uint32 {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(s))
@@ -55,7 +39,10 @@ func shardForKey(key string, n int) int {
 	return int(hashKey(key) % uint32(n))
 }
 
-func runTxn3(hosts []*perHost, txid string, ops []kvs.Op) (bool, int) {
+//NOTE: interface implementations for get/put/batch for Client
+//are missing. Only those needed for PA2 are included.
+
+func (Client) runTxn3(hosts []*perHost, txid string, ops []kvs.Op) (bool, int) {
 	//we need to prepare the build , sort, txprepare for shard etc
 	modes := strongestModes(ops)
 	type item struct {
@@ -144,16 +131,16 @@ func runTxn3(hosts []*perHost, txid string, ops []kvs.Op) (bool, int) {
 
 }
 
-func Dial(addr string) *Client {
+func Dial(addr string) *ServerClientConn {
 	rpcClient, err := rpc.DialHTTP("tcp", addr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	return &Client{rpcClient, uuid.New().String(), addr}
+	return &ServerClientConn{rpcClient: rpcClient, Name: uuid.New().String(), addr}
 }
 
-func (client *Client) Get(key string) string {
+func (client *ServerClientConn) Get(key string) string {
 	request := kvs.GetRequest{
 		Key: key,
 	}
@@ -166,7 +153,7 @@ func (client *Client) Get(key string) string {
 	return response.Value
 }
 
-func (client *Client) Put(key string, value string) {
+func (client *ServerClientConn) Put(key string, value string) {
 	request := kvs.PutRequest{
 		Key:   key,
 		Value: value,
@@ -178,7 +165,7 @@ func (client *Client) Put(key string, value string) {
 	}
 }
 
-func (client *Client) Batch(ops []kvs.Op) []string {
+func (client *ServerClientConn) Batch(ops []kvs.Op) []string {
 	request, response := kvs.RequestBatch{Ops: ops, Src: client.Name, Dest: client.Dest}, kvs.ResponseBatch{}
 	if err := client.rpcClient.Call("KVService.Batch", &request, &response); err != nil {
 		log.Fatal(err)
@@ -188,7 +175,8 @@ func (client *Client) Batch(ops []kvs.Op) []string {
 
 func TxGetRPC(rc *rpc.Client, txid string, key string) (string, bool) {
 	//request := txGetRequest{Tx: TxID(txid), Key:key}
-	request := kvs.TxGetRequest{Tx: kvs.TxID(txid), Key: key}
+	request := kvs.TxGetRequest{Tx: kvs.TxID(txid)}
+	request.GetRequest.Key = key
 	//var response txGetResponse
 	var response kvs.TxGetResponse
 	//for a RPC error , lets have the caller abort and retry
@@ -204,7 +192,9 @@ func TxGetRPC(rc *rpc.Client, txid string, key string) (string, bool) {
 
 func TxPutRPC(rc *rpc.Client, txid string, key, value string) bool {
 	//request := txPutRequest{Tx: TxID(txid), Key:key, Value: value}
-	request := kvs.TxPutRequest{Tx: kvs.TxID(txid), Key: key, Value: value}
+	request := kvs.TxPutRequest{Tx: kvs.TxID(txid)}
+	request.Key = key
+	request.Value = value
 	//var response txPutResponse
 	var response kvs.TxPutResponse
 
@@ -266,36 +256,7 @@ func runClient(id int, addrs []string, done *atomic.Bool, workload *kvs.Workload
 			//sendq:    make(chan []kvs.Op, 2),
 		}
 		hosts[i] = h
-		/*
-			wg.Add(1)
-			go func(h *perHost) {
-				defer wg.Done()
-				for b := range h.sendq {
-					res := h.c.Batch(b)
-					opsDone.Add(uint64(len(res)))
-				}
-			}(h)
-		*/
 	}
-
-	/*
-		flushOne := func(h *perHost) {
-			if len(h.active) == 0 { return }
-			full := h.active
-			h.active, h.spare = h.spare[:0], full
-			h.deadline = time.Now().Add(ttlFlush)
-			h.sendq <- full
-		}
-
-		flushExpired := func() {
-			now := time.Now()
-			for _, h := range hosts {
-				if now.After(h.deadline) && len(h.active) > 0 {
-					flushOne(h)
-				}
-			}
-		}
-	*/
 
 	//TODO: modify to support manual abort/commit
 	for !done.Load() {
@@ -328,30 +289,7 @@ func runClient(id int, addrs []string, done *atomic.Bool, workload *kvs.Workload
 				break
 			}
 		}
-		/*
-			for j := 0; j < 4096 && !done.Load(); j++ {
-				op := workload.Next()
-				key := strconv.FormatUint(op.Key, 10)
-				shard := int(hashKey(key) % uint32(len(hosts)))
-				h := hosts[shard]
-
-				if op.IsRead {
-					h.active = append(h.active, kvs.Op{IsRead: true, Key: key})
-				} else {
-					h.active = append(h.active, kvs.Op{IsRead: false, Key: key, Value: value})
-				}
-				if len(h.active) >= cap(h.active) {
-					flushOne(h)
-				}
-			}
-			flushExpired()
-		*/
 	}
-	/*
-		for _, h := range hosts { flushOne(h) }
-		for _, h := range hosts { close(h.sendq) }
-		wg.Wait()
-	*/
 	fmt.Printf("Client %d finished operations.\n", id)
 	resultsCh <- opsDone.Load()
 }
