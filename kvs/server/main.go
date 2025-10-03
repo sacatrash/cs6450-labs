@@ -341,7 +341,7 @@ func (kv *KVService) TxAbort(request *kvs.TxAbortRequest, response *kvs.TxAbortR
 }
 
 // initiate a transaction
-func (kv *KVService) TxBegin(request *kvs.TxPrepareRequest, response *kvs.TxPrepareResponse) error {
+func (kv *KVService) TxBegin(request *kvs.TxBeginRequest, response *kvs.TxBeginResponse) error {
 	kv.CreateTxState(request.Tx)
 	response.Error = nil
 	return nil

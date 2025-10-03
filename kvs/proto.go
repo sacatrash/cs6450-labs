@@ -166,16 +166,6 @@ func (t TxID) SetNew(id string) {
 // PRE LOCK
 type LockMode string
 
-// these prepares are to preacquire s/x locks in a single ordered way
-type TxPrepareResponse struct {
-	Response
-}
-
-type TxPrepareRequest struct {
-	Request
-	Tx TxID
-}
-
 /*
 	type Transaction struct {
 		//req Request
