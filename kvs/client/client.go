@@ -1,15 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/rpc"
-	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
@@ -116,6 +112,7 @@ func (cli *Client) PutRPC(key string, value string) chan kvs.PutResponse {
 	return ret
 }
 
+/* commented out due to errors
 // processes any pending ops as a batch
 func (client *Client) processBatch() {
 	var liveShards []*ServerClientConn
@@ -148,7 +145,6 @@ func (client *Client) processBatch() {
 	}
 }
 
-/* ##############################*/
 
 func runClient(id int, addrs []string, done *atomic.Bool, workload *kvs.Workload, resultsCh chan<- uint64) {
 	//batchSize := 4096
@@ -211,3 +207,4 @@ func runClient(id int, addrs []string, done *atomic.Bool, workload *kvs.Workload
 	fmt.Printf("Client %d finished operations.\n", id)
 	resultsCh <- opsDone.Load()
 }
+*/

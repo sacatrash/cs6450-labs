@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
-	"sort"
+	"sync/atomic"
 
+	"github.com/google/uuid"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
@@ -22,11 +24,6 @@ func (cli TxnClient) doRPC(op *kvs.Op) any {
 	var response any
 	var rpcStr string
 
-	//if txnID invalid, begin new txn
-	if !cli.TxnID.Valid {
-
-	}
-
 	switch op.Type {
 	case kvs.READ:
 		tmp := kvs.TxGetRequest{Tx: cli.TxnID}
@@ -34,15 +31,12 @@ func (cli TxnClient) doRPC(op *kvs.Op) any {
 		request = tmp
 		response = kvs.TxGetResponse{}
 		rpcStr = "KVService.TxGet"
-
-		break
 	case kvs.WRITE:
 		tmp := kvs.TxPutRequest{Tx: cli.TxnID}
 		tmp.Key = op.Key
 		tmp.Value = op.Value
 		response = kvs.PutResponse{}
 		rpcStr = "KVService.TxPut"
-		break
 	case kvs.COMMIT:
 		request = kvs.TxCommitRequest{Tx: cli.TxnID}
 		response = kvs.TxCommitResponse{}
@@ -51,6 +45,10 @@ func (cli TxnClient) doRPC(op *kvs.Op) any {
 		request = kvs.TxCommitRequest{Tx: cli.TxnID}
 		response = kvs.TxCommitResponse{}
 		rpcStr = "KVService.TxAbort"
+	case kvs.BEGIN:
+		request = kvs.TxBeginRequest{Tx: cli.TxnID}
+		response = kvs.TxBeginResponse{}
+		rpcStr = "KVService.TxBegin"
 
 	}
 	err := client.rpcClient.Call(rpcStr, &request, &response)
@@ -62,105 +60,83 @@ func (cli TxnClient) doRPC(op *kvs.Op) any {
 }
 
 func (cli TxnClient) GetTxnRPC(key string) chan kvs.TxGetResponse {
-
+	ret := make(chan kvs.TxGetResponse)
+	go func() {
+		v := cli.doRPC(&kvs.Op{Type: kvs.WRITE, Key: key})
+		ret <- v.(kvs.TxGetResponse)
+	}()
+	return ret
 }
 
 func (cli TxnClient) PutTxnRPC(key string, val string) chan kvs.TxPutResponse {
-
+	ret := make(chan kvs.TxPutResponse)
+	go func() {
+		v := cli.doRPC(&kvs.Op{Type: kvs.WRITE, Key: key, Value: val})
+		ret <- v.(kvs.TxPutResponse)
+	}()
+	return ret
 }
 
 func (cli TxnClient) AbortTxnRPC() chan kvs.TxAbortResponse {
-
+	ret := make(chan kvs.TxAbortResponse)
+	go func() {
+		v := cli.doRPC(&kvs.Op{Type: kvs.ABORT})
+		ret <- v.(kvs.TxAbortResponse)
+	}()
+	return ret
 }
 
-func (cli TxnClient) CommitTxnRPC(key string) chan kvs.TxCommitResponse {
-
+func (cli TxnClient) CommitTxnRPC() chan kvs.TxCommitResponse {
+	//once commit is called we cannot abort
+	ret := make(chan kvs.TxCommitResponse)
+	go func() {
+		v := cli.doRPC(&kvs.Op{Type: kvs.ABORT})
+		ret <- v.(kvs.TxCommitResponse)
+	}()
+	return ret
 }
 
-func (Client) runTxn3(hosts []*perHost, txid string, ops []kvs.Op) (bool, int) {
-	//we need to prepare the build , sort, txprepare for shard etc
-	modes := strongestModes(ops)
-	type item struct {
-		shard int
-		key   string
-		mode  kvs.LockMode
+func (cli TxnClient) BeginTxnRPC() chan kvs.TxBeginResponse {
+	cli.TxnID.SetNew(cli.Name + uuid.New().String())
+	ret := make(chan kvs.TxBeginResponse)
+	go func() {
+		v := cli.doRPC(&kvs.Op{Type: kvs.BEGIN})
+		ret <- v.(kvs.TxBeginResponse)
+	}()
+	return ret
+}
+
+func runTxnClient(id int, addrs []string, done *atomic.Bool, workload kvs.TxnWorkload, resultsCh chan<- uint64) {
+	//batchSize := 4096
+	//ttlFlush := time.Millisecond
+	cli := &TxnClient{}
+	cli.Name = uuid.New().String()
+	cli.Hosts = make([]*ServerClientConn, len(addrs))
+	//var wg sync.WaitGroup
+	var opsDone atomic.Uint64
+
+	for i, addr := range addrs {
+		cli.Hosts[i] = Dial(addr)
 	}
-	var items []item
-	for k, md := range modes {
-		items = append(items, item{
-			shard: shardForKey(k, len(hosts)),
-			key:   k,
-			mode:  md,
-		})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].shard != items[j].shard {
-			return items[i].shard < items[j].shard
-		}
-		return items[i].key < items[j].key
-	})
-	// we need to group per shard
-	type group struct {
-		shard int
-		list  []kvs.TxLockItem
-	}
-	var groups []group
-	for _, it := range items {
-		if len(groups) == 0 || groups[len(groups)-1].shard != it.shard {
-			groups = append(groups, group{shard: it.shard})
-		}
-		groups[len(groups)-1].list = append(
-			groups[len(groups)-1].list,
-			kvs.TxLockItem{
-				Key:  it.key,
-				Mode: it.mode,
-			},
-		)
-	}
-	participants := txParticipant{}
-	for _, g := range groups {
-		if !TxPrepareRPC(hosts[g.shard].c.rpcClient, txid, g.list) {
-			for p := range participants {
-				_ = TxAbortRPC(hosts[p].c.rpcClient, txid)
-			}
-			return false, 0
-		}
-		participants[g.shard] = true
-	}
-	for _, op := range ops {
-		sh := shardForKey(op.Key, len(hosts))
-		if op.IsRead() {
-			if _, ok := TxGetRPC(hosts[sh].c.rpcClient, txid, op.Key); !ok {
-				for p := range participants {
-					_ = TxAbortRPC(hosts[p].c.rpcClient, txid)
-				}
-				return false, 0
-			}
-		} else if op.IsWrite() {
-			if !TxPutRPC(hosts[sh].c.rpcClient, txid, op.Key, op.Value) {
-				for p := range participants {
-					_ = TxAbortRPC(hosts[p].c.rpcClient, txid)
-				}
-				return false, 0
-			}
+
+	for !done.Load() {
+		//initialize txn
+
+		init := <-cli.BeginTxnRPC()
+
+		if !init.IsOk() {
+			cli.AbortTxnRPC()
+			continue
 		}
 
-	}
-	//2PC commit for touched shards
-	first := true
-	okAll := true
-	for p := range participants {
-		ok := TxCommitRPC(hosts[p].c.rpcClient, txid, first)
-		if !ok {
-			okAll = false
+		res := workload.Next(cli)
+
+		//on failure, abort current txn
+		if !res {
+			cli.AbortTxnRPC()
 		}
-		first = false
 	}
-	if !okAll {
-		for p := range participants {
-			_ = TxAbortRPC(hosts[p].c.rpcClient, txid)
-		}
-		return false, 0
-	}
-	return true, len(ops)
+
+	fmt.Printf("Client %d finished operations.\n", id)
+	resultsCh <- opsDone.Load()
 }

@@ -10,6 +10,7 @@ const (
 	WRITE  = 1
 	COMMIT = 2
 	ABORT  = 3
+	BEGIN  = 4
 )
 
 const (
@@ -233,6 +234,19 @@ type TxAbortResponse struct {
 	Response
 }
 
+func (r TxBeginResponse) IsOk() bool {
+	return r.Response.IsOk()
+}
+
+type TxBeginRequest struct {
+	Request
+	Tx TxID
+}
+
+type TxBeginResponse struct {
+	Response
+}
+
 func (r TxAbortResponse) IsOk() bool {
 	return r.Response.IsOk()
 }
@@ -256,4 +270,5 @@ type ClientTxnRpc interface {
 	PutTxnRPC(key string, val string) chan TxPutResponse
 	AbortTxnRPC() chan TxAbortResponse
 	CommitTxnRPC() chan TxCommitResponse
+	BeginTxnRPC() chan TxBeginResponse
 }

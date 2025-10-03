@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+type DefaultWorkload interface {
+	Next(client *ClientTxnRpc) bool
+}
+
 type Workload struct {
 	records       uint64            // Number of records in the key-value store.
 	recordSize    uint64            // Size of each record in bytes.
@@ -172,33 +176,37 @@ func NewAccountingWorkload(id uint64, acctNum uint64, init float64, maxI int) *A
 	return workload
 }
 
+type TxnWorkload interface {
+	Next(client ClientTxnRpc) bool
+}
+
 // returns true if txn was successful/didn't abort
-func (w *AccountingWorkload) Next(client *ClientTxnRpc) bool {
+func (w AccountingWorkload) Next(client ClientTxnRpc) bool {
 
 	if w.txnCtr > 0 {
 		defer func() { w.txnCtr-- }()
 		//check balance, abort if not enough
-		srcBalGet := <-(*client).GetTxnRPC(w.srcAcct)
+		srcBalGet := <-client.GetTxnRPC(w.srcAcct)
 
 		srcBal, ok1 := strconv.ParseFloat(srcBalGet.Get(), 64)
 
 		if ok1 != nil || (!srcBalGet.IsOk()) || srcBal < 100 {
-			<-(*client).AbortTxnRPC()
+			<-client.AbortTxnRPC()
 			w.txnCtr++
 			return false
 		}
-		dstBalGet := <-(*client).GetTxnRPC(w.dstAcct)
+		dstBalGet := <-client.GetTxnRPC(w.dstAcct)
 		dstBal, ok2 := strconv.ParseFloat(dstBalGet.Get(), 64)
 
 		//transfer balance src->dst
-		ok3 := (<-(*client).PutTxnRPC(w.srcAcct, strconv.FormatFloat(srcBal-100, 'f', -1, 64))).IsOk()
-		ok4 := (<-(*client).PutTxnRPC(w.dstAcct, strconv.FormatFloat(dstBal+100, 'f', -1, 64))).IsOk()
+		ok3 := (<-client.PutTxnRPC(w.srcAcct, strconv.FormatFloat(srcBal-100, 'f', -1, 64))).IsOk()
+		ok4 := (<-client.PutTxnRPC(w.dstAcct, strconv.FormatFloat(dstBal+100, 'f', -1, 64))).IsOk()
 
 		if ok3 && ok4 && ok2 == nil && dstBalGet.IsOk() {
-			<-(*client).CommitTxnRPC()
+			<-client.CommitTxnRPC()
 			return true
 		} else {
-			<-(*client).AbortTxnRPC()
+			<-client.AbortTxnRPC()
 			w.txnCtr++
 			return false
 		}
@@ -208,12 +216,12 @@ func (w *AccountingWorkload) Next(client *ClientTxnRpc) bool {
 		var i uint64
 		var total float64
 		for i = 0; i < uint64(w.records); i++ {
-			v := <-(*client).GetTxnRPC(strconv.FormatUint(i, 10))
+			v := <-client.GetTxnRPC(strconv.FormatUint(i, 10))
 			if v.IsOk() {
 				tmp, _ := strconv.ParseFloat(v.Get(), 64)
 				total += tmp
 			} else {
-				<-(*client).AbortTxnRPC()
+				<-client.AbortTxnRPC()
 				return false
 			}
 		}
@@ -222,7 +230,7 @@ func (w *AccountingWorkload) Next(client *ClientTxnRpc) bool {
 			fmt.Printf("ASSERT FAILED: expected total %f actual total %f.\n\n", expected, total)
 		}
 
-		return (<-(*client).CommitTxnRPC()).IsOk()
+		return (<-client.CommitTxnRPC()).IsOk()
 	}
 
 }

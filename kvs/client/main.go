@@ -75,8 +75,9 @@ func main() {
 			clientId := i*(*host_generators) + g
 
 			go func(clientId int, addrs []string) {
-				work_load := kvs.NewWorkload(*workload, *theta)
-				runClient(clientId, addrs, &done, work_load, resultsCh)
+				//work_load := kvs.NewWorkload(*workload, *theta)
+				work_load := kvs.NewAccountingWorkload(uint64(clientId), 10, 100, 50)
+				runTxnClient(clientId, addrs, &done, work_load, resultsCh)
 			}(clientId, hosts)
 		}
 	}
