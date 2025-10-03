@@ -54,6 +54,7 @@ func (cli TxnClient) doRPC(op *kvs.Op) any {
 	err := client.rpcClient.Call(rpcStr, request, response)
 	if err != nil {
 		log.Fatal(err)
+		panic(err)
 	}
 
 	return response
