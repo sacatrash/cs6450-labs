@@ -103,7 +103,10 @@ type LockRequest struct {
 
 /*NEW WORKLOAD TRANSACTION RPC (REMOTE PROCEDURE CALLS) REQUEST AND RESPONSE STRUCTS */
 
-type TxID string
+type TxID struct {
+	string
+	Valid bool
+}
 
 // PRE LOCK
 type LockMode string
@@ -129,6 +132,28 @@ type TxPrepareRequest struct {
 	Items []TxLockItem
 }
 
+/*
+	type Transaction struct {
+		//req Request
+		Key string
+		op Op
+		time Time
+	}
+*/
+type TxGetResponse struct {
+	GetResponse
+	//ok bool
+}
+
+func (r TxGetResponse) IsOk() bool {
+	return r.Response.IsOk()
+}
+
+type TxGetRequest struct {
+	GetRequest
+	Tx TxID
+}
+
 type TxCommitRequest struct {
 	Request
 	Tx   TxID
@@ -140,6 +165,19 @@ type TxCommitResponse struct {
 }
 
 func (r TxCommitResponse) IsOk() bool {
+	return r.Response.IsOk()
+}
+
+type TxPutRequest struct {
+	PutRequest
+	Tx TxID
+}
+
+type TxPutResponse struct {
+	PutResponse
+}
+
+func (r TxPutResponse) IsOk() bool {
 	return r.Response.IsOk()
 }
 
@@ -171,6 +209,8 @@ type ClientRpc interface {
 }
 
 type ClientTxnRpc interface {
+	GetTxnRPC(key string) chan TxGetResponse
+	PutTxnRPC(key string, val string) chan TxPutResponse
 	AbortTxnRPC() chan TxAbortResponse
 	CommitTxnRPC() chan TxCommitResponse
 }
