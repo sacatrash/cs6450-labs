@@ -59,49 +59,49 @@ func (cli TxnClient) doRPC(op *kvs.Op) any {
 	return response
 }
 
-func (cli TxnClient) GetTxnRPC(key string) chan kvs.TxGetResponse {
-	ret := make(chan kvs.TxGetResponse)
+func (cli TxnClient) GetTxnRPC(key string) chan *kvs.TxGetResponse {
+	ret := make(chan *kvs.TxGetResponse)
 	go func() {
 		v := cli.doRPC(&kvs.Op{Type: kvs.WRITE, Key: key})
-		ret <- v.(kvs.TxGetResponse)
+		ret <- v.(*kvs.TxGetResponse)
 	}()
 	return ret
 }
 
-func (cli TxnClient) PutTxnRPC(key string, val string) chan kvs.TxPutResponse {
-	ret := make(chan kvs.TxPutResponse)
+func (cli TxnClient) PutTxnRPC(key string, val string) chan *kvs.TxPutResponse {
+	ret := make(chan *kvs.TxPutResponse)
 	go func() {
 		v := cli.doRPC(&kvs.Op{Type: kvs.WRITE, Key: key, Value: val})
-		ret <- v.(kvs.TxPutResponse)
+		ret <- v.(*kvs.TxPutResponse)
 	}()
 	return ret
 }
 
-func (cli TxnClient) AbortTxnRPC() chan kvs.TxAbortResponse {
-	ret := make(chan kvs.TxAbortResponse)
+func (cli TxnClient) AbortTxnRPC() chan *kvs.TxAbortResponse {
+	ret := make(chan *kvs.TxAbortResponse)
 	go func() {
 		v := cli.doRPC(&kvs.Op{Type: kvs.ABORT})
-		ret <- v.(kvs.TxAbortResponse)
+		ret <- v.(*kvs.TxAbortResponse)
 	}()
 	return ret
 }
 
-func (cli TxnClient) CommitTxnRPC() chan kvs.TxCommitResponse {
+func (cli TxnClient) CommitTxnRPC() chan *kvs.TxCommitResponse {
 	//once commit is called we cannot abort
-	ret := make(chan kvs.TxCommitResponse)
+	ret := make(chan *kvs.TxCommitResponse)
 	go func() {
 		v := cli.doRPC(&kvs.Op{Type: kvs.ABORT})
-		ret <- v.(kvs.TxCommitResponse)
+		ret <- v.(*kvs.TxCommitResponse)
 	}()
 	return ret
 }
 
-func (cli TxnClient) BeginTxnRPC() chan kvs.TxBeginResponse {
+func (cli TxnClient) BeginTxnRPC() chan *kvs.TxBeginResponse {
 	cli.TxnID.SetNew(cli.Name + uuid.New().String())
-	ret := make(chan kvs.TxBeginResponse)
+	ret := make(chan *kvs.TxBeginResponse)
 	go func() {
 		v := cli.doRPC(&kvs.Op{Type: kvs.BEGIN})
-		ret <- v.(kvs.TxBeginResponse)
+		ret <- v.(*kvs.TxBeginResponse)
 	}()
 	return ret
 }

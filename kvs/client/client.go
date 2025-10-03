@@ -84,28 +84,28 @@ func (cli Client) doRPC(op *kvs.Op) any {
 	return response
 }
 
-func (cli *Client) GetRPC(key string) chan kvs.GetResponse {
-	ret := make(chan kvs.GetResponse)
+func (cli *Client) GetRPC(key string) chan *kvs.GetResponse {
+	ret := make(chan *kvs.GetResponse)
 	op := kvs.Op{Key: key, Type: kvs.READ}
 	if cli.ShouldBatchRPCs() {
 		cli.waiting.Store(ret, op)
 	} else {
 		go func() {
-			v, _ := cli.doRPC(&op).(kvs.GetResponse)
+			v, _ := cli.doRPC(&op).(*kvs.GetResponse)
 			ret <- v
 		}()
 	}
 	return ret
 }
 
-func (cli *Client) PutRPC(key string, value string) chan kvs.PutResponse {
-	ret := make(chan kvs.PutResponse)
+func (cli *Client) PutRPC(key string, value string) chan *kvs.PutResponse {
+	ret := make(chan *kvs.PutResponse)
 	op := kvs.Op{Key: key, Value: value, Type: kvs.WRITE}
 	if cli.ShouldBatchRPCs() {
 		cli.waiting.Store(ret, op)
 	} else {
 		go func() {
-			v, _ := cli.doRPC(&op).(kvs.PutResponse)
+			v, _ := cli.doRPC(&op).(*kvs.PutResponse)
 			ret <- v
 		}()
 	}

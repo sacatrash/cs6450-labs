@@ -248,15 +248,15 @@ type GenericRpc interface {
 
 // Interfaces define the types of RPCs which clients can send
 type ClientRpc interface {
-	GetRPC(key string) chan GetResponse
-	PutRPC(key string, val string) chan PutResponse
+	GetRPC(key string) chan *GetResponse
+	PutRPC(key string, val string) chan *PutResponse
 	ShouldBatchRPCs() bool //if true, batches RPCs when Get/Put called instead of calling outright
 }
 
 type ClientTxnRpc interface {
-	GetTxnRPC(key string) chan TxGetResponse
-	PutTxnRPC(key string, val string) chan TxPutResponse
-	AbortTxnRPC() chan TxAbortResponse
-	CommitTxnRPC() chan TxCommitResponse
-	BeginTxnRPC() chan TxBeginResponse
+	GetTxnRPC(key string) chan *TxGetResponse
+	PutTxnRPC(key string, val string) chan *TxPutResponse
+	AbortTxnRPC() chan *TxAbortResponse
+	CommitTxnRPC() chan *TxCommitResponse
+	BeginTxnRPC() chan *TxBeginResponse
 }
