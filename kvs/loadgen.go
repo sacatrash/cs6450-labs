@@ -46,14 +46,14 @@ func NewWorkload(name string, theta float64) *Workload {
 
 // processes a workload, returning a list of operations to perform.
 // data is of type Response, consisting of the prior operations' response.
-func (w *Workload) Next(client *ClientRpc) bool {
+func (w *Workload) Next(client ClientRpc) bool {
 	key := strconv.FormatUint(w.keygen.Uint64()%w.records, 10)
 	isRead := w.gen.Uint64() < w.readThreshold
 	value := strings.Repeat("x", 128)
 	if isRead {
-		return (<-(*client).GetRPC(key)).IsOk()
+		return (<-client.GetRPC(key)).IsOk()
 	} else {
-		return (<-(*client).PutRPC(key, value)).IsOk()
+		return (<-client.PutRPC(key, value)).IsOk()
 	}
 
 }
@@ -184,6 +184,7 @@ func (w *AccountingWorkload) Next(client *ClientTxnRpc) bool {
 
 		if ok1 != nil || (!srcBalGet.IsOk()) || srcBal < 100 {
 			<-(*client).AbortTxnRPC()
+			w.txnCtr++
 			return false
 		}
 		dstBalGet := <-(*client).GetTxnRPC(w.dstAcct)
@@ -198,6 +199,7 @@ func (w *AccountingWorkload) Next(client *ClientTxnRpc) bool {
 			return true
 		} else {
 			<-(*client).AbortTxnRPC()
+			w.txnCtr++
 			return false
 		}
 	} else {

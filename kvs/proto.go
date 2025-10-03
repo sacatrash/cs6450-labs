@@ -1,6 +1,7 @@
 package kvs
 
 import (
+	"hash/fnv"
 	"sync"
 )
 
@@ -9,6 +10,18 @@ const (
 	WRITE  = 1
 	COMMIT = 2
 	ABORT  = 3
+)
+
+const (
+	Lock_S  LockMode = "S"
+	Lock_X  LockMode = "X"
+	LOCK_NA LockMode = "NA"
+
+	ERROR_S_LOCK_FAIL   ResponseError = "Could not acquire read lock"
+	ERROR_X_LOCK_FAIL   ResponseError = "Could not acquire write lock"
+	ERROR_BAD_TXID      ResponseError = "Incorrect TxID"
+	ERROR_NOT_PROCESSED ResponseError = "RPC pending processing in batch."
+	ERROR_OTHER         ResponseError = "Unknown error."
 )
 
 type Op struct {
@@ -33,10 +46,40 @@ func (o *Op) IsAbort() bool {
 	return o.Type == ABORT
 }
 
+func HashKey(s string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum32()
+}
+
+func ShardForKey(key string, n int) int {
+	return int(HashKey(key) % uint32(n))
+}
+
+func StrongestModes(ops []Op) map[string]LockMode {
+	m := map[string]LockMode{}
+	for _, op := range ops {
+		if op.IsRead() {
+			if _, ok := m[op.Key]; !ok {
+				m[op.Key] = Lock_S
+			}
+		} else if op.IsWrite() {
+			m[op.Key] = Lock_X
+		}
+	}
+	return m
+}
+
 type Content struct {
 	sync.Mutex
-	Order int
+	Key   string
 	Value string
+}
+
+type ResponseError string
+
+func (e ResponseError) Error() string {
+	return string(e)
 }
 
 func (c *Content) SetContent(newValue string) {
@@ -105,21 +148,22 @@ type LockRequest struct {
 
 type TxID struct {
 	string
-	Valid bool
+}
+
+func (t TxID) IsValid() bool {
+	return t.string != ""
+}
+
+func (t TxID) Invalidate() {
+	t.string = ""
+}
+
+func (t TxID) SetNew(id string) {
+	t.string = id
 }
 
 // PRE LOCK
 type LockMode string
-
-const (
-	Lock_S LockMode = "S"
-	Lock_X LockMode = "X"
-)
-
-type TxLockItem struct {
-	Key  string
-	Mode LockMode
-}
 
 // these prepares are to preacquire s/x locks in a single ordered way
 type TxPrepareResponse struct {
@@ -128,8 +172,7 @@ type TxPrepareResponse struct {
 
 type TxPrepareRequest struct {
 	Request
-	Tx    TxID
-	Items []TxLockItem
+	Tx TxID
 }
 
 /*

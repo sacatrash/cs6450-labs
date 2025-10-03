@@ -23,15 +23,54 @@ type Stats struct {
 }
 
 type keyLock struct {
-	readers map[string]struct{}
-	writer  string
+	key string
+	//readers map[*txState]any
+	readers     sync.Map
+	readerCount *atomic.Uint32
+	writer      *txState
 }
 
 type txState struct {
-	writes map[string]string
-	s_held map[string]struct{}
-	x_held map[string]struct{}
-	active bool
+	id kvs.TxID
+	//writes map[string]string
+	writes sync.Map
+	//s_held map[string]*keyLock
+	s_held sync.Map
+	//x_held map[string]*keyLock
+	x_held sync.Map
+}
+
+// use the KVService mutex when we need to add/remove keys
+// use the mutexMap mutex for getting/setting existing keys
+type KVService struct {
+	//sync.Mutex
+	//mp        map[string]*atomic.Value
+	mu        sync.Mutex //mutex used during lock acquisition/release
+	mp        sync.Map
+	stats     Stats
+	prevStats Stats
+	lastPrint time.Time
+	//ordMtx    []*kvs.Content
+
+	//locks map[string]*keyLock
+	locks sync.Map
+	//txs   map[kvs.TxID]*txState
+	txs sync.Map
+}
+
+func (kv *KVService) getTx(txid kvs.TxID) (*txState, bool) {
+	tmp, err := kv.txs.Load(txid)
+	return tmp.(*txState), err
+}
+
+func (tx *txState) getSLockFromKey(key string) (*keyLock, bool) {
+	tmp, err := tx.s_held.Load(key)
+	return tmp.(*keyLock), err
+}
+
+func (tx *txState) getXLockFromKey(key string) (*keyLock, bool) {
+	tmp, err := tx.x_held.Load(key)
+	return tmp.(*keyLock), err
 }
 
 func (s *Stats) Init() {
@@ -89,146 +128,111 @@ func (s *Stats) Sub(prev *Stats) Stats {
 	return r
 }
 
-// use the KVService mutex when we need to add/remove keys
-// use the mutexMap mutex for getting/setting existing keys
-type KVService struct {
-	//sync.Mutex
-	//mp        map[string]*atomic.Value
-	mu        sync.Mutex
-	mp        sync.Map
-	stats     Stats
-	prevStats Stats
-	lastPrint time.Time
-	ordMtx    []*kvs.Content
-
-	locks map[string]*keyLock
-	txs   map[string]*txState
-}
-
 // EDITED
 func NewKVService() *KVService {
-	kvs := &KVService{}
-	//kvs.mp = make(map[string]*atomic.Value)
-	//kvs.mp = sync.Map{}
-	kvs.txs = map[string]*txState{}
-	kvs.locks = map[string]*keyLock{}
-	kvs.lastPrint = time.Now()
-	kvs.stats.Init()
-	kvs.prevStats.Init()
-	return kvs
+	kv := &KVService{}
+	kv.mp = sync.Map{}
+	kv.txs = sync.Map{}
+	kv.locks = sync.Map{}
+	kv.lastPrint = time.Now()
+	kv.stats.Init()
+	kv.prevStats.Init()
+	return kv
 }
 
-// CHECK THIS, EDIT IT MORE?
-// will return the commited value holder for key. if the key does not
-// exist , one will be created and will store it in the sync map
-func (kv *KVService) getOrCreateCommitt(key string) *kvs.Content {
-	if v, ok := kv.mp.Load(key); ok {
-		switch valueVal := v.(type) {
-		case *kvs.Content:
-			return valueVal
-		case string:
-			c := &kvs.Content{Order: len(kv.ordMtx), Value: valueVal}
-			kv.mp.Store(key, c)
-			kv.ordMtx = append(kv.ordMtx, c)
-			return c
-		}
-
-		/*
-		   if s, ok := v.(string); ok {
-		       c := &kvs.Content{Order: len(kv.ordMtx), Value: s}
-		       kv.mp.Store(key, c)
-		       kv.ordMtx = append(kv.ordMtx, c)
-		       return c
-		   }*/
-	}
-	c := &kvs.Content{Order: len(kv.ordMtx)}
-	kv.mp.Store(key, c)
-	kv.ordMtx = append(kv.ordMtx, c)
-	return c
+func (kv *KVService) getOrCreateContent(key string) *kvs.Content {
+	c, _ := kv.mp.LoadOrStore(key, &kvs.Content{Key: key})
+	return c.(*kvs.Content)
 }
 
 func (kv *KVService) getOrCreateLockState(key string) *keyLock {
-	lok, ok := kv.locks[key]
+	lok, ok := kv.locks.Load(key)
 	if !ok {
-		lok = &keyLock{readers: map[string]struct{}{}}
-		kv.locks[key] = lok
+		lok = &keyLock{key: key, readers: sync.Map{}}
+		kv.locks.Store(key, lok)
 	}
-	return lok
+	return lok.(*keyLock)
 }
 
-func (kv *KVService) getOrCreateTxState(txid string) *txState {
-	state, ok := kv.txs[txid]
-	if !ok {
-		state = &txState{
-			writes: map[string]string{},
-			s_held: map[string]struct{}{},
-			x_held: map[string]struct{}{},
-			active: true,
-		}
-		kv.txs[txid] = state
+func (kv *KVService) CreateTxState(txid kvs.TxID) *txState {
+	state, ok := kv.getTx(txid)
+	if ok {
+		kv.txCleanUp(state.id)
 	}
+	state = &txState{
+		id:     txid,
+		writes: sync.Map{},
+		s_held: sync.Map{},
+		x_held: sync.Map{},
+	}
+	kv.txs.Store(txid, state)
 	return state
 }
 
 // non blocking lock requests, grant the lock if its safe to do so
-func (kv *KVService) try_S(txid, key string) bool {
+func (kv *KVService) tryAcquireS(tx *txState, key string) bool {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 	lok := kv.getOrCreateLockState(key)
-	if lok.writer != "" && lok.writer != txid {
+	if lok.writer != nil && lok.writer != tx {
 		return false
 	}
-	lok.readers[txid] = struct{}{}
-	kv.getOrCreateTxState(txid).s_held[key] = struct{}{}
+	lok.readers.Store(tx, nil)
+	tx.s_held.Store(key, lok)
 	return true
 }
 
 /*
  */
-func (kv *KVService) try_X(txid, key string) bool {
+func (kv *KVService) tryAcquireX(tx *txState, key string) bool {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 	lok := kv.getOrCreateLockState(key)
-	if lok.writer == txid {
+	if lok.writer == tx {
 		return true
 	}
-	if lok.writer != "" && lok.writer != txid {
+	if lok.writer != nil && lok.writer != tx {
 		return false
 	}
-	if len(lok.readers) > 0 {
-		if _, ok := lok.readers[txid]; !ok {
+	if lok.readerCount.Load() > 0 {
+		if _, ok := lok.readers.Load(tx); !ok {
 			return false
 		}
-		delete(lok.readers, txid)
-		delete(kv.getOrCreateTxState(txid).s_held, key)
+		lok.readers.Delete(tx)
+		lok.readerCount.Store(lok.readerCount.Load() - 1)
+		tx.s_held.Delete(key)
 	}
-	lok.writer = txid
-	kv.getOrCreateTxState(txid).x_held[key] = struct{}{}
+	lok.writer = tx
+	tx.x_held.Store(key, tx)
 	return true
 }
 
 // transaction clean up- drop every lock that tx holds and remove its staged state. why?
 // so other transactions can continue and locks or memory is leaked
-func (kv *KVService) txCleanUp(txid string) {
-	state, ok := kv.txs[txid]
+func (kv *KVService) txCleanUp(txid kvs.TxID) {
+	state, ok := kv.getTx(txid)
 	if ok {
-		for k := range state.s_held {
-			delete(kv.getOrCreateLockState(k).readers, txid)
-		}
-		for k := range state.x_held {
-			if kv.getOrCreateLockState(k).writer == txid {
-				kv.getOrCreateLockState(k).writer = ""
+		kv.mu.Lock()
+		defer kv.mu.Unlock()
+		state.x_held.Range(func(k any, v any) bool {
+			//remove self from all write locks
+			vl := v.(*keyLock)
+			if vl.writer == state {
+				vl.writer = nil
 			}
-		}
-		delete(kv.txs, txid)
+			return true
+		})
+		state.s_held.Range(func(k any, v any) bool {
+			//remove self from all read locks
+			vl := v.(*keyLock)
+			vl.readers.Delete(state)
+			return true
+		})
+		kv.txs.Delete(txid)
 	}
 }
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
 	kv.stats.gets.Add(1)
-	/*vlk, ok := kv.mutexMap[request.Key]
-
-	if ok {
-		vlk.Lock()
-		defer vlk.Unlock()
-	} else {
-		return nil
-	}*/
 
 	if value, ok := kv.mp.Load(request.Key); ok {
 		switch valueVal := value.(type) {
@@ -243,28 +247,10 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	return nil
 }
 
-func (kv *KVService) GetNewOrder() int {
-	return len(kv.ordMtx)
-}
-
-/* //helper function probably not needed
-func (kv *KVService) PutAndCheck(key string, value string) {
-	v, ok = kv.mp.Get(key)
-	if(!ok) {
-		tmp := Content{Order: kv.GetNewOrder(), Value: value}
-		kv.mp.Store(key, tmp)
-		kv.ordMtx = append(kv.ordMtx, tmp)
-	}
-	else {
-		v.setContent(value)
-	}
-}
-*/
-
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
 	kv.stats.puts.Add(1)
 	kv.mp.Store(request.Key, request.Value)
-	response.Ok = true
+	response.Error = nil
 	return nil
 
 	//kv.PutAndCheck(request.Key, request.Value)
@@ -277,22 +263,29 @@ func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.TxGetRespons
 
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	kv.stats.gets.Add(1)
-	state := kv.getOrCreateTxState(string(request.Tx))
-	if v, ok := state.writes[request.Key]; ok {
-		response.Value, response.Ok = v, true
+	state, sOk := kv.getTx(request.Tx)
+	if !sOk {
+		response.Error = kvs.ERROR_BAD_TXID
+		return nil
+	}
+	//if we have write lock, clear to proceed wit hread
+	if v, ok := state.writes.Load(request.Key); ok {
+		kv.stats.gets.Add(1)
+		response.Value, response.Error = v.(string), nil
 		return nil
 	}
 
-	if _, r := state.s_held[request.Key]; !r {
-		if _, x := state.x_held[request.Key]; !x {
-			response.Ok = false
+	//attempt to get read lock
+	if !kv.tryAcquireS(state, request.Key) {
+		if _, x := state.getXLockFromKey(request.Key); !x {
+			response.Error = kvs.ERROR_S_LOCK_FAIL
 			return nil
 		}
 	}
 
-	response.Ok = true
-	c := kv.getOrCreateCommitt(request.Key)
+	response.Error = nil
+	c := kv.getOrCreateContent(request.Key)
+	kv.stats.gets.Add(1)
 	response.Value = c.Value
 	return nil
 }
@@ -300,70 +293,57 @@ func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.TxGetRespons
 func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.TxPutResponse) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	kv.stats.puts.Add(1)
-	state := kv.getOrCreateTxState(string(request.Tx))
-	if _, ok := state.x_held[request.Key]; !ok {
-		response.Ok = false
+	state, sOk := kv.getTx(request.Tx)
+	if !sOk {
+		response.Error = kvs.ERROR_BAD_TXID
 		return nil
 	}
-	state.writes[request.Key] = request.Value
-	response.Ok = true
+	if !kv.tryAcquireX(state, request.Key) {
+		response.Error = kvs.ERROR_X_LOCK_FAIL
+		return nil
+	}
+	kv.stats.puts.Add(1)
+	state.writes.Store(request.Key, request.Value)
+	response.Error = nil
 	return nil
 }
 
 func (kv *KVService) TxCommit(request *kvs.TxCommitRequest, response *kvs.TxCommitResponse) error {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	state, ok := kv.txs[string(request.Tx)]
+	//mutex locking unnecessary because if we are committing then we have proper lock access
+	//kv.mu.Lock()
+	//defer kv.mu.Unlock()
+	state, ok := kv.getTx(request.Tx)
 	if !ok {
-		response.Ok = true
+		response.Error = kvs.ERROR_BAD_TXID
 		return nil
 	}
 
-	for k, v := range state.writes {
-		c := kv.getOrCreateCommitt(k)
-		c.Lock()
-		c.SetContent(v)
-		c.Unlock()
-	}
-	kv.txCleanUp(string(request.Tx))
+	state.writes.Range(func(k any, v any) bool {
+		c := kv.getOrCreateContent(k.(string))
+		c.SetContent(v.(string))
+		return true
+	})
+
+	kv.txCleanUp(request.Tx)
 	kv.stats.commits.Add(1)
-	response.Ok = true
+	response.Error = nil
 	return nil
 }
 
 // drop the staged write and release the locks
 func (kv *KVService) TxAbort(request *kvs.TxAbortRequest, response *kvs.TxAbortResponse) error {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	kv.txCleanUp(string(request.Tx))
+	//kv.mu.Lock()
+	//defer kv.mu.Unlock()
+	kv.txCleanUp(request.Tx)
 	kv.stats.aborts.Add(1)
-	response.Ok = true
+	response.Error = nil
 	return nil
 }
 
-// get all of the requested locks per shard
+// initiate a transaction
 func (kv *KVService) TxPrepare(request *kvs.TxPrepareRequest, response *kvs.TxPrepareResponse) error {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	for _, item := range request.Items {
-		if item.Mode == kvs.Lock_X {
-			if !kv.try_X(string(request.Tx), item.Key) {
-				kv.txCleanUp(string(request.Tx))
-				response.Ok = false
-				return nil
-			}
-
-		} else {
-			if !kv.try_S(string(request.Tx), item.Key) {
-				kv.txCleanUp(string(request.Tx))
-				response.Ok = false
-				return nil
-			}
-		}
-	}
-	response.Ok = true
+	kv.CreateTxState(request.Tx)
+	response.Error = nil
 	return nil
 }
 

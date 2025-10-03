@@ -3,43 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"hash/fnv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
-
-const (
-	//constants for batching
-	MAX_BATCH  = 4096
-	FLUSH_FREQ = 4096
-)
-
-func (Client) ShouldBatchRPCs() bool {
-	return true
-}
-
-func hashKey(s string) uint32 {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(s))
-	return h.Sum32()
-}
-
-func strongestModes(ops []kvs.Op) map[string]kvs.LockMode {
-	m := map[string]kvs.LockMode{}
-	for _, op := range ops {
-		if op.IsRead() {
-			if _, ok := m[op.Key]; !ok {
-				m[op.Key] = kvs.Lock_S
-			}
-		} else if op.IsWrite() {
-			m[op.Key] = kvs.Lock_X
-		}
-	}
-	return m
-}
 
 type HostList []string
 
