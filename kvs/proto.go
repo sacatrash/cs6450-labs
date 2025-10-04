@@ -79,10 +79,6 @@ type Content struct {
 
 type ResponseError string
 
-func (e ResponseError) Error() string {
-	return string(e)
-}
-
 func (c *Content) SetContent(newValue string) {
 	c.Value = newValue
 }
@@ -95,29 +91,22 @@ type ResponseInterface interface {
 }
 
 type Response struct {
-	Error error
+	Error ResponseError
 }
 
 func (r Response) IsOk() bool {
-	return r.Error == nil
+	return r.Error == ""
 }
 
 type DataResponse interface {
 	Get() string
+	IsOk() bool
 }
 
 type PutRequest struct {
 	Request
 	Key   string
 	Value string
-}
-
-type PutResponse struct {
-	Response
-}
-
-func (r PutResponse) IsOk() bool {
-	return r.Response.IsOk()
 }
 
 type GetRequest struct {
@@ -149,36 +138,23 @@ type LockRequest struct {
 
 type TxID string
 
-func (t TxID) IsValid() bool {
-	return t != ""
+func (t *TxID) IsValid() bool {
+	return *t != ""
 }
 
-func (t TxID) Invalidate() {
-	t = ""
+func (t *TxID) Invalidate() {
+	*t = ""
 }
 
-func (t TxID) SetNew(id string) {
-	t = TxID(id)
+func GetNew(id string) TxID {
+	return TxID(id)
 }
 
 // PRE LOCK
 type LockMode string
 
-/*
-	type Transaction struct {
-		//req Request
-		Key string
-		op Op
-		time Time
-	}
-*/
-type TxGetResponse struct {
-	GetResponse
-	//ok bool
-}
-
-func (r TxGetResponse) IsOk() bool {
-	return r.Response.IsOk()
+type TxGenericRequest interface {
+	GetTxID() TxID
 }
 
 type TxGetRequest struct {
@@ -186,18 +162,8 @@ type TxGetRequest struct {
 	Tx TxID
 }
 
-type TxCommitRequest struct {
-	Request
-	Tx   TxID
-	Lead bool
-}
-
-type TxCommitResponse struct {
-	Response
-}
-
-func (r TxCommitResponse) IsOk() bool {
-	return r.Response.IsOk()
+func (t TxGetRequest) GetTxID() TxID {
+	return t.Tx
 }
 
 type TxPutRequest struct {
@@ -205,38 +171,17 @@ type TxPutRequest struct {
 	Tx TxID
 }
 
-type TxPutResponse struct {
-	PutResponse
+func (t TxPutRequest) GetTxID() TxID {
+	return t.Tx
 }
 
-func (r TxPutResponse) IsOk() bool {
-	return r.Response.IsOk()
-}
-
-type TxAbortRequest struct {
+type TxRequest struct {
 	Request
 	Tx TxID
 }
 
-type TxAbortResponse struct {
-	Response
-}
-
-func (r TxBeginResponse) IsOk() bool {
-	return r.Response.IsOk()
-}
-
-type TxBeginRequest struct {
-	Request
-	Tx TxID
-}
-
-type TxBeginResponse struct {
-	Response
-}
-
-func (r TxAbortResponse) IsOk() bool {
-	return r.Response.IsOk()
+func (t TxRequest) GetTxID() TxID {
+	return t.Tx
 }
 
 // generic interface to handle the RPC of an Op
@@ -248,15 +193,15 @@ type GenericRpc interface {
 
 // Interfaces define the types of RPCs which clients can send
 type ClientRpc interface {
-	GetRPC(key string) chan *GetResponse
-	PutRPC(key string, val string) chan *PutResponse
+	GetRPC(key string) chan DataResponse
+	PutRPC(key string, val string) chan ResponseInterface
 	ShouldBatchRPCs() bool //if true, batches RPCs when Get/Put called instead of calling outright
 }
 
 type ClientTxnRpc interface {
-	GetTxnRPC(key string) chan *TxGetResponse
-	PutTxnRPC(key string, val string) chan *TxPutResponse
-	AbortTxnRPC() chan *TxAbortResponse
-	CommitTxnRPC() chan *TxCommitResponse
-	BeginTxnRPC() chan *TxBeginResponse
+	GetTxnRPC(key string, id TxID) chan DataResponse
+	PutTxnRPC(key string, val string, id TxID) chan ResponseInterface
+	AbortTxnRPC(id TxID) chan ResponseInterface
+	CommitTxnRPC(id TxID) chan ResponseInterface
+	BeginTxnRPC(id TxID) chan ResponseInterface
 }

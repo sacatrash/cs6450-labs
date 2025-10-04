@@ -2,31 +2,12 @@ package main
 
 import (
 	"log"
-	"net/rpc"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
-
-const (
-	//constants for batching
-	MAX_BATCH  = 4096
-	FLUSH_FREQ = time.Millisecond
-)
-
-func (Client) ShouldBatchRPCs() bool {
-	return true
-}
-
-type ServerClientConn struct {
-	rpcClient *rpc.Client
-	Dest      string
-	deadline  time.Time
-	sendq     []kvs.BatchOp
-	//op -> response chan
-	op2chan *sync.Map
-}
 
 type Client struct {
 	Hosts []*ServerClientConn
@@ -36,20 +17,30 @@ type Client struct {
 	//Response -> Op
 	waiting  *sync.Map
 	maxBatch int
+	opsDone  *atomic.Uint64
 }
 
-func (cli *Client) getShard(key string) *ServerClientConn {
-	return cli.Hosts[kvs.ShardForKey(key, len(cli.Hosts))]
+func (c Client) GetHost(i int) *ServerClientConn {
+	return c.Hosts[i]
 }
 
-func Dial(addr string) *ServerClientConn {
-	rpcClient, err := rpc.DialHTTP("tcp", addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return &ServerClientConn{rpcClient: rpcClient, Dest: addr}
+func (c Client) GetName() string {
+	return c.Name
 }
+
+func (c Client) GetOpsDone() *atomic.Uint64 {
+	return c.opsDone
+}
+
+func (Client) ShouldBatchRPCs() bool {
+	return true
+}
+
+const (
+	//constants for batching
+	MAX_BATCH  = 4096
+	FLUSH_FREQ = time.Millisecond
+)
 
 // performs one RPC in sync
 func (cli Client) doRPC(op *kvs.Op) any {
@@ -67,7 +58,7 @@ func (cli Client) doRPC(op *kvs.Op) any {
 		break
 	case kvs.WRITE:
 		request = &kvs.PutRequest{Key: op.Key, Value: op.Value}
-		response = &kvs.PutResponse{}
+		response = &kvs.Response{}
 		rpcStr = "KVService.Put"
 		break
 	case kvs.COMMIT:
@@ -85,28 +76,28 @@ func (cli Client) doRPC(op *kvs.Op) any {
 	return response
 }
 
-func (cli *Client) GetRPC(key string) chan *kvs.GetResponse {
-	ret := make(chan *kvs.GetResponse)
+func (cli *Client) GetRPC(key string) chan kvs.DataResponse {
+	ret := make(chan kvs.DataResponse)
 	op := kvs.Op{Key: key, Type: kvs.READ}
 	if cli.ShouldBatchRPCs() {
 		cli.waiting.Store(ret, op)
 	} else {
 		go func() {
-			v, _ := cli.doRPC(&op).(*kvs.GetResponse)
+			v, _ := cli.doRPC(&op).(kvs.DataResponse)
 			ret <- v
 		}()
 	}
 	return ret
 }
 
-func (cli *Client) PutRPC(key string, value string) chan *kvs.PutResponse {
-	ret := make(chan *kvs.PutResponse)
+func (cli *Client) PutRPC(key string, value string) chan kvs.ResponseInterface {
+	ret := make(chan kvs.ResponseInterface)
 	op := kvs.Op{Key: key, Value: value, Type: kvs.WRITE}
 	if cli.ShouldBatchRPCs() {
 		cli.waiting.Store(ret, op)
 	} else {
 		go func() {
-			v, _ := cli.doRPC(&op).(*kvs.PutResponse)
+			v, _ := cli.doRPC(&op).(kvs.ResponseInterface)
 			ret <- v
 		}()
 	}

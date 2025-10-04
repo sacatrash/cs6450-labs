@@ -3,14 +3,35 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"net/rpc"
+	"os"
+	"os/signal"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
 type HostList []string
+
+type BaseClient interface {
+	GetHost(i int) *ServerClientConn
+	GetName() string
+	GetOpsDone() *atomic.Uint64
+}
+
+type ServerClientConn struct {
+	rpcClient *rpc.Client
+	Dest      string
+	deadline  time.Time
+	sendq     []kvs.BatchOp
+	//op -> response chan
+	op2chan *sync.Map
+}
 
 func (h *HostList) String() string {
 	return strings.Join(*h, ",")
@@ -21,6 +42,19 @@ func (h *HostList) Set(value string) error {
 	return nil
 }
 
+func (cli *Client) getShard(key string) *ServerClientConn {
+	return cli.Hosts[kvs.ShardForKey(key, len(cli.Hosts))]
+}
+
+func Dial(addr string) *ServerClientConn {
+	rpcClient, err := rpc.DialHTTP("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return &ServerClientConn{rpcClient: rpcClient, Dest: addr}
+}
+
 /*EDIT main*/
 func main() {
 	hosts := HostList{}
@@ -28,11 +62,15 @@ func main() {
 	flag.Var(&hosts, "hosts", "Comma-separated list of host:ports to connect to")
 	theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
 	//INCLUDE XFER BELOW
-	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C)")
+	workload := flag.String("workload", "Accounting", "Workload type (YCSB-A, YCSB-B, YCSB-C, Accounting)")
 	//addition
-	host_generators := flag.Int("host_generators", 2, "generators per host")
+	defaultHosts := 2
+	if *workload == "Accounting" {
+		defaultHosts = 1
+	}
+	host_generators := flag.Int("host_generators", defaultHosts, "generators per host")
 
-	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
+	secs := flag.Int("secs", 30, "Duration in seconds for each client to run. Set to 0 for infinite run.")
 	flag.Parse()
 
 	if len(hosts) == 0 {
@@ -70,35 +108,67 @@ func main() {
 		}
 	*/
 
+	cli := &TxnClient{}
+	cli.Name = uuid.New().String()
+	cli.Hosts = make([]*ServerClientConn, len(hosts))
+	cli.opsDone = &atomic.Uint64{}
+
+	for i, addr := range hosts {
+		cli.Hosts[i] = Dial(addr)
+	}
+
 	for i := range hosts {
 		for g := 0; g < *host_generators; g++ {
 			clientId := i*(*host_generators) + g
 
 			go func(clientId int, addrs []string) {
-				//work_load := kvs.NewWorkload(*workload, *theta)
-				work_load := kvs.NewAccountingWorkload(uint64(clientId), 10, 100, 50)
-				runTxnClient(clientId, addrs, &done, work_load, resultsCh)
+				var work_load kvs.TxnWorkload
+				if *workload == "Accounting" {
+					work_load = kvs.NewAccountingWorkload(uint64(clientId), 10, 100, 50)
+				} else {
+					work_load = kvs.NewTxnWorkload(*workload, *theta)
+				}
+				cli.runTxnClient(clientId, &done, work_load, resultsCh)
 			}(clientId, hosts)
 		}
 	}
 
-	time.Sleep(time.Duration(*secs) * time.Second)
-	done.Store(true)
+	finish := func() {
+		done.Store(true)
 
-	//opsCompleted := <-resultsCh
-	/*
+		//opsCompleted := <-resultsCh
+		/*
+			var opsCompleted uint64
+			for range hosts {
+				opsCompleted += <- resultsCh
+			}
+		*/
 		var opsCompleted uint64
-		for range hosts {
-			opsCompleted += <- resultsCh
+		for i := 0; i < len(hosts)*(*host_generators); i++ {
+			opsCompleted += <-resultsCh
 		}
-	*/
-	var opsCompleted uint64
-	for i := 0; i < len(hosts)*(*host_generators); i++ {
-		opsCompleted += <-resultsCh
+
+		elapsed := time.Since(start)
+
+		opsPerSec := float64(opsCompleted) / elapsed.Seconds()
+		fmt.Printf("throughput %.2f ops/s\n", opsPerSec)
+		os.Exit(0)
 	}
 
-	elapsed := time.Since(start)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		for range c {
+			// sig is a ^C, handle it
+			finish()
+		}
+	}()
 
-	opsPerSec := float64(opsCompleted) / elapsed.Seconds()
-	fmt.Printf("throughput %.2f ops/s\n", opsPerSec)
+	if *secs > 0 {
+		time.Sleep(time.Duration(*secs) * time.Second)
+		finish()
+	} else {
+		for {
+		}
+	}
 }
