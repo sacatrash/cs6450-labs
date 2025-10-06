@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
@@ -70,23 +71,15 @@ func main() {
 	done := atomic.Bool{}
 	//resultsCh := make(chan uint64)
 	resultsCh := make(chan uint64, len(hosts)*(*host_generators))
-	/*
-		host := hosts[0]
-		clientId := 0
-		go func(clientId int) {
-			workload := kvs.NewWorkload(*workload, *theta)
-			runClient(clientId, host, &done, workload, resultsCh)
-		}(clientId)
-	*/
-	/*
-		for i, host := range hosts {
-			clientId := i
-			go func(host string , clientId int) {
-				workload := kvs.NewWorkload(*workload , *theta)
-				runClient(clientId, host, &done, workload, resultsCh)
-			}(host, clientId)
-		}
-	*/
+
+	cli := TxnClient{}
+	cli.Name = uuid.New().String()
+	cli.Hosts = make([]*kvs.ServerClientConn, len(hosts))
+	cli.opsDone = &atomic.Uint64{}
+
+	for i, addr := range hosts {
+		cli.Hosts[i] = Dial(addr)
+	}
 
 	for i := range hosts {
 		for g := 0; g < *host_generators; g++ {
@@ -98,7 +91,7 @@ func main() {
 				} else {
 					work_load = kvs.NewTxnWorkload(*workload, *theta)
 				}
-				RunTxnClient(clientId, hosts, &done, work_load, resultsCh)
+				RunTxnClient(clientId, cli, &done, work_load, resultsCh)
 			}(clientId, hosts)
 		}
 	}

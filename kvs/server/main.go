@@ -316,6 +316,11 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.Response) error 
 // return a staged value if there is one
 func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse) error {
 	state, sOk := kv.getTx(request.GetTxID())
+	if !sOk {
+		response.Error = kvs.ERROR_BAD_TXID
+		kv.DoBadTxID(request.GetTxID())
+		return nil
+	}
 	if state.abort {
 		response.Error = kvs.ERROR_SERVER_ABT
 		return nil
@@ -324,11 +329,6 @@ func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse)
 		kv.mu.Lock()
 		fmt.Printf("GET id: \n%s\n", request.GetTxID())
 		kv.mu.Unlock()
-	}
-	if !sOk {
-		response.Error = kvs.ERROR_BAD_TXID
-		kv.DoBadTxID(request.GetTxID())
-		return nil
 	}
 	//if we have write lock, clear to proceed with read
 	if v, ok := state.writes.Load(request.Key); ok {
@@ -363,6 +363,11 @@ func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse)
 
 func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.Response) error {
 	state, sOk := kv.getTx(request.GetTxID())
+	if !sOk {
+		kv.DoBadTxID(request.GetTxID())
+		response.Error = kvs.ERROR_BAD_TXID
+		return nil
+	}
 	if state.abort {
 		response.Error = kvs.ERROR_SERVER_ABT
 		return nil
@@ -371,11 +376,6 @@ func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.Response) er
 		kv.mu.Lock()
 		fmt.Printf("PUT id: \n%s\n", request.GetTxID())
 		kv.mu.Unlock()
-	}
-	if !sOk {
-		kv.DoBadTxID(request.GetTxID())
-		response.Error = kvs.ERROR_BAD_TXID
-		return nil
 	}
 	if !kv.tryAcquireX(state, request.Key) {
 		response.Error = kvs.ERROR_X_LOCK_FAIL
@@ -392,6 +392,11 @@ func (kv *KVService) TxCommit(request *kvs.TxRequest, response *kvs.Response) er
 	//kv.mu.Lock()
 	//defer kv.mu.Unlock()
 	state, ok := kv.getTx(request.GetTxID())
+	if !ok {
+		kv.DoBadTxID(request.GetTxID())
+		response.Error = kvs.ERROR_BAD_TXID
+		return nil
+	}
 	if state.abort {
 		response.Error = kvs.ERROR_SERVER_ABT
 		return nil
@@ -400,11 +405,6 @@ func (kv *KVService) TxCommit(request *kvs.TxRequest, response *kvs.Response) er
 		kv.mu.Lock()
 		fmt.Printf("COMMIT id: \n%s\n", request.GetTxID())
 		kv.mu.Unlock()
-	}
-	if !ok {
-		kv.DoBadTxID(request.GetTxID())
-		response.Error = kvs.ERROR_BAD_TXID
-		return nil
 	}
 
 	state.writes.Range(func(k any, v any) bool {

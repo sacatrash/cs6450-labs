@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"sync/atomic"
 
-	"github.com/google/uuid"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
@@ -164,16 +163,16 @@ func (cli *TxnClient) BeginTxnRPC(Tx kvs.TxID) chan kvs.ResponseInterface {
 	return ret
 }
 
-func RunTxnClient(id int, hosts []string, done *atomic.Bool, workload kvs.DefaultWorkload, resultsCh chan<- uint64) {
+func RunTxnClient(id int, cli TxnClient /*hosts []string,*/, done *atomic.Bool, workload kvs.DefaultWorkload, resultsCh chan<- uint64) {
 
-	cli := &TxnClient{}
+	/*cli := TxnClient{}
 	cli.Name = uuid.New().String()
 	cli.Hosts = make([]*kvs.ServerClientConn, len(hosts))
 	cli.opsDone = &atomic.Uint64{}
 
 	for i, addr := range hosts {
 		cli.Hosts[i] = Dial(addr)
-	}
+	}*/
 
 	for !done.Load() {
 		//initialize txn
@@ -184,7 +183,7 @@ func RunTxnClient(id int, hosts []string, done *atomic.Bool, workload kvs.Defaul
 				<-cli.AbortTxnRPC()
 				continue
 			}
-			res := workload.Next(cli)
+			res := workload.Next(&cli)
 
 			//on failure, abort current txn
 			if !res {
