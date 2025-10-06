@@ -15,9 +15,10 @@ type Client struct {
 	//Response -> Op
 	active *sync.Map
 	//Response -> Op
-	waiting  *sync.Map
-	maxBatch int
-	opsDone  *atomic.Uint64
+	waiting    *sync.Map
+	maxBatch   int
+	opsDone    *atomic.Uint64
+	opsRetried *atomic.Uint64
 }
 
 func (c Client) GetHost(i int) *kvs.ServerClientConn {

@@ -69,13 +69,14 @@ func main() {
 	start := time.Now()
 
 	done := atomic.Bool{}
-	//resultsCh := make(chan uint64)
 	resultsCh := make(chan uint64, len(hosts)*(*host_generators))
+	retriesCh := make(chan uint64, len(hosts)*(*host_generators))
 
 	cli := TxnClient{}
 	cli.Name = uuid.New().String()
 	cli.Hosts = make([]*kvs.ServerClientConn, len(hosts))
 	cli.opsDone = &atomic.Uint64{}
+	cli.opsRetried = &atomic.Uint64{}
 
 	for i, addr := range hosts {
 		cli.Hosts[i] = Dial(addr)
@@ -91,7 +92,7 @@ func main() {
 				} else {
 					work_load = kvs.NewTxnWorkload(*workload, *theta)
 				}
-				RunTxnClient(clientId, cli, &done, work_load, resultsCh)
+				RunTxnClient(clientId, cli, &done, work_load, resultsCh, retriesCh)
 			}(clientId, hosts)
 		}
 	}
@@ -111,10 +112,16 @@ func main() {
 			opsCompleted += <-resultsCh
 		}
 
+		var opsRetried uint64
+		for i := 0; i < len(hosts)*(*host_generators); i++ {
+			opsRetried += <-retriesCh
+		}
+
 		elapsed := time.Since(start)
 
 		opsPerSec := float64(opsCompleted) / elapsed.Seconds()
-		fmt.Printf("throughput %.2f ops/s\n", opsPerSec)
+		retriesPerSec := float64(opsRetried) / elapsed.Seconds()
+		fmt.Printf("throughput %.2f ops/s\nRetries: %.2f ops/s\n", opsPerSec, retriesPerSec)
 		os.Exit(0)
 	}
 

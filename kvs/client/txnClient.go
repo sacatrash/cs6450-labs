@@ -3,10 +3,18 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
+)
+
+const (
+	//if more than 1, attempts to retry the rpc after a random delay
+	RETRY_COUNT    = 0
+	RETRY_MAX_TIME = .01
 )
 
 type txParticipant map[int]bool
@@ -87,14 +95,25 @@ func (cli *TxnClient) DoRPC(op *kvs.Op) any {
 	var err error
 	//fmt.Printf("\n%s %s\n", TxnID, rpcStr)
 	if op.Type == kvs.READ || op.Type == kvs.WRITE {
-		client := cli.Client.getShard(op.Key)
-		err = client.RpcClient.Call(rpcStr, request, response)
+		for b := RETRY_COUNT; b >= 0; b-- {
+			client := cli.Client.getShard(op.Key)
+			err = client.RpcClient.Call(rpcStr, request, response)
+			if err == nil {
+				e := response.(kvs.ResponseInterface).GetError()
+				if e == kvs.ERROR_SERVER_ABT || !(e == kvs.ERROR_S_LOCK_FAIL || e == kvs.ERROR_X_LOCK_FAIL) {
+					break
+				} else {
+					cli.opsRetried.Add(1)
+					time.Sleep(time.Duration(rand.Float64() * RETRY_MAX_TIME))
+				}
+			}
+		}
 
 	} else {
 		for i := range cli.Client.Hosts {
 			var tmpResponse = &kvs.Response{}
 			err = cli.Client.GetHost(i).RpcClient.Call(rpcStr, request, tmpResponse)
-			if !response.(*kvs.Response).IsOk() {
+			if !response.(kvs.ResponseInterface).IsOk() {
 				response = tmpResponse
 			}
 		}
@@ -163,7 +182,7 @@ func (cli *TxnClient) BeginTxnRPC(Tx kvs.TxID) chan kvs.ResponseInterface {
 	return ret
 }
 
-func RunTxnClient(id int, cli TxnClient /*hosts []string,*/, done *atomic.Bool, workload kvs.DefaultWorkload, resultsCh chan<- uint64) {
+func RunTxnClient(id int, cli TxnClient /*hosts []string,*/, done *atomic.Bool, workload kvs.DefaultWorkload, resultsCh chan<- uint64, retriesCh chan<- uint64) {
 
 	/*cli := TxnClient{}
 	cli.Name = uuid.New().String()
@@ -197,4 +216,5 @@ func RunTxnClient(id int, cli TxnClient /*hosts []string,*/, done *atomic.Bool, 
 
 	fmt.Printf("Client %d finished operations.\n", id)
 	resultsCh <- cli.GetOpsDone().Load()
+	retriesCh <- cli.opsRetried.Load()
 }

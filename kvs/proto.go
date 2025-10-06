@@ -92,6 +92,7 @@ type Request struct {
 
 type ResponseInterface interface {
 	IsOk() bool
+	GetError() ResponseError
 }
 
 type Response struct {
@@ -100,6 +101,10 @@ type Response struct {
 
 func (r Response) IsOk() bool {
 	return r.Error == ""
+}
+
+func (r Response) GetError() ResponseError {
+	return r.Error
 }
 
 type DataResponse interface {
@@ -125,6 +130,10 @@ type GetResponse struct {
 
 func (r GetResponse) IsOk() bool {
 	return r.Response.IsOk()
+}
+
+func (r GetResponse) GetError() ResponseError {
+	return r.Response.GetError()
 }
 
 func (r GetResponse) Get() string {

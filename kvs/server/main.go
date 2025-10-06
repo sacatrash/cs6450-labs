@@ -17,7 +17,7 @@ import (
 
 const (
 	//0=ignore (break serializability); 1=abort write; 2=abort all reads; 3=snapshot (currently breaks serializability)
-	WRITE_LOCK_TYPE = 3
+	WRITE_LOCK_TYPE = 1
 )
 
 type keyLock struct {
