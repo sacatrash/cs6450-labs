@@ -47,18 +47,17 @@ type KVService struct {
 
 	//locks map[string]*keyLock
 	locks sync.Map
-	//txs   map[kvs.TxID]*txState
-	txs sync.Map
+	txs   map[kvs.TxID]*txState
+	//txs sync.Map
 
 	debug      bool
 	debugError bool
 }
 
 func (kv *KVService) DebugPrintKeys() {
-	kv.txs.Range(func(key any, value any) bool {
-		fmt.Printf("%s\n", key)
-		return true
-	})
+	for k, _ := range kv.txs {
+		fmt.Printf("%s\n", k)
+	}
 }
 
 func (kv *KVService) DoBadTxID(txid kvs.TxID) {
@@ -66,6 +65,7 @@ func (kv *KVService) DoBadTxID(txid kvs.TxID) {
 	if kv.debugError {
 		fmt.Printf("\nBAD TXID: %s\nCURRENT KEYS:\n", txid)
 		kv.DebugPrintKeys()
+		return
 	}
 }
 
@@ -78,11 +78,11 @@ func newKeyLock(key string) *keyLock {
 }
 
 func (kv *KVService) getTx(txid kvs.TxID) (*txState, bool) {
-	tmp, err := kv.txs.Load(txid)
+	tmp, err := kv.txs[txid]
 	if !err {
 		return nil, err
 	}
-	return tmp.(*txState), err
+	return tmp, err
 }
 
 func (tx *txState) getSLockFromKey(key string) (*keyLock, bool) {
@@ -140,7 +140,7 @@ func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatc
 func NewKVService() *KVService {
 	kv := &KVService{}
 	kv.mp = sync.Map{}
-	kv.txs = sync.Map{}
+	kv.txs = make(map[kvs.TxID]*txState)
 	kv.locks = sync.Map{}
 	kv.lastPrint = time.Now()
 	kv.stats.Init()
@@ -174,7 +174,7 @@ func (kv *KVService) CreateTxState(txid kvs.TxID) *txState {
 		s_held: sync.Map{},
 		x_held: sync.Map{},
 	}
-	kv.txs.Store(txid, state)
+	kv.txs[txid] = state
 	return state
 }
 
@@ -240,7 +240,7 @@ func (kv *KVService) txCleanUp(txid kvs.TxID) {
 			vl.readers.Delete(state)
 			return true
 		})
-		kv.txs.Delete(txid)
+		delete(kv.txs, txid)
 	}
 }
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
