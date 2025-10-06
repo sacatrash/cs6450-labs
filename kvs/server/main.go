@@ -47,24 +47,40 @@ type KVService struct {
 
 	//locks map[string]*keyLock
 	locks sync.Map
-	txs   map[kvs.TxID]*txState
-	//txs sync.Map
+	//txs   map[kvs.TxID]*txState
+	txs sync.Map
 
 	debug      bool
 	debugError bool
 }
 
+func NewKVService() *KVService {
+	kv := &KVService{}
+	kv.mp = sync.Map{}
+	kv.txs = sync.Map{}
+	kv.locks = sync.Map{}
+	kv.lastPrint = time.Now()
+	kv.stats.Init()
+	kv.prevStats.Init()
+	kv.debug = false
+	kv.debugError = false
+	return kv
+}
+
 func (kv *KVService) DebugPrintKeys() {
-	for k, _ := range kv.txs {
-		fmt.Printf("%s\n", k)
-	}
+	kv.txs.Range(func(key any, value any) bool {
+		fmt.Printf("%s\n", key)
+		return true
+	})
 }
 
 func (kv *KVService) DoBadTxID(txid kvs.TxID) {
 	kv.stats.abort_error.Add(1)
 	if kv.debugError {
+		kv.mu.Lock()
 		fmt.Printf("\nBAD TXID: %s\nCURRENT KEYS:\n", txid)
 		kv.DebugPrintKeys()
+		kv.mu.Unlock()
 		return
 	}
 }
@@ -78,11 +94,11 @@ func newKeyLock(key string) *keyLock {
 }
 
 func (kv *KVService) getTx(txid kvs.TxID) (*txState, bool) {
-	tmp, err := kv.txs[txid]
+	tmp, err := kv.txs.Load(txid)
 	if !err {
 		return nil, err
 	}
-	return tmp, err
+	return tmp.(*txState), err
 }
 
 func (tx *txState) getSLockFromKey(key string) (*keyLock, bool) {
@@ -136,20 +152,6 @@ func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatc
 	return nil
 }
 
-// EDITED
-func NewKVService() *KVService {
-	kv := &KVService{}
-	kv.mp = sync.Map{}
-	kv.txs = make(map[kvs.TxID]*txState)
-	kv.locks = sync.Map{}
-	kv.lastPrint = time.Now()
-	kv.stats.Init()
-	kv.prevStats.Init()
-	kv.debug = false
-	kv.debugError = true
-	return kv
-}
-
 func (kv *KVService) getOrCreateContent(key string) *kvs.Content {
 	c, _ := kv.mp.LoadOrStore(key, &kvs.Content{Key: key})
 	return c.(*kvs.Content)
@@ -174,7 +176,7 @@ func (kv *KVService) CreateTxState(txid kvs.TxID) *txState {
 		s_held: sync.Map{},
 		x_held: sync.Map{},
 	}
-	kv.txs[txid] = state
+	kv.txs.Store(txid, state)
 	return state
 }
 
@@ -240,7 +242,11 @@ func (kv *KVService) txCleanUp(txid kvs.TxID) {
 			vl.readers.Delete(state)
 			return true
 		})
-		delete(kv.txs, txid)
+		kv.txs.Delete(txid)
+		_, nok := kv.txs.Load(txid)
+		if nok {
+			panic("Key was not deleted!")
+		}
 	}
 }
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
@@ -273,7 +279,9 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.Response) error 
 func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse) error {
 	state, sOk := kv.getTx(request.GetTxID())
 	if kv.debug {
+		kv.mu.Lock()
 		fmt.Printf("GET id: \n%s\n", request.GetTxID())
+		kv.mu.Unlock()
 	}
 	if !sOk {
 		response.Error = kvs.ERROR_BAD_TXID
@@ -305,7 +313,9 @@ func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse)
 func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.Response) error {
 	state, sOk := kv.getTx(request.GetTxID())
 	if kv.debug {
+		kv.mu.Lock()
 		fmt.Printf("PUT id: \n%s\n", request.GetTxID())
+		kv.mu.Unlock()
 	}
 	if !sOk {
 		kv.DoBadTxID(request.GetTxID())
@@ -328,7 +338,9 @@ func (kv *KVService) TxCommit(request *kvs.TxRequest, response *kvs.Response) er
 	//defer kv.mu.Unlock()
 	state, ok := kv.getTx(request.GetTxID())
 	if kv.debug {
+		kv.mu.Lock()
 		fmt.Printf("COMMIT id: \n%s\n", request.GetTxID())
+		kv.mu.Unlock()
 	}
 	if !ok {
 		kv.DoBadTxID(request.GetTxID())
@@ -353,7 +365,9 @@ func (kv *KVService) TxAbort(request *kvs.TxRequest, response *kvs.Response) err
 	//kv.mu.Lock()
 	//defer kv.mu.Unlock()
 	if kv.debug {
+		kv.mu.Lock()
 		fmt.Printf("ABORT id: \n%s\n", request.GetTxID())
+		kv.mu.Unlock()
 	}
 	kv.txCleanUp(request.GetTxID())
 	kv.stats.aborts.Add(1)
@@ -364,7 +378,9 @@ func (kv *KVService) TxAbort(request *kvs.TxRequest, response *kvs.Response) err
 // initiate a transaction
 func (kv *KVService) TxBegin(request *kvs.TxRequest, response *kvs.Response) error {
 	if kv.debug {
+		kv.mu.Lock()
 		fmt.Printf("BEGIN id: \n%s\n", request.GetTxID())
+		kv.mu.Unlock()
 	}
 	if !request.GetTxID().IsValid() {
 		kv.DoBadTxID(request.GetTxID())

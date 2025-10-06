@@ -171,16 +171,16 @@ func (cli *TxnClient) RunClient(id int, done *atomic.Bool, workload kvs.DefaultW
 
 		if cli.TxID.IsValid() {
 			if !init.IsOk() {
-				cli.AbortTxnRPC()
+				<-cli.AbortTxnRPC()
 				continue
 			}
 			res := workload.Next(cli)
 
 			//on failure, abort current txn
 			if !res {
-				cli.AbortTxnRPC()
+				<-cli.AbortTxnRPC()
 			} else {
-				cli.CommitTxnRPC()
+				<-cli.CommitTxnRPC()
 				cli.GetOpsDone().Add(1)
 			}
 		}
