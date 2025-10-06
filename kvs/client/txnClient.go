@@ -85,7 +85,7 @@ func (cli *TxnClient) DoRPC(op *kvs.Op) any {
 		rpcStr = "KVService.TxBegin"
 	}
 	var err error
-	fmt.Printf("\n%s %s\n", TxnID, rpcStr)
+	//fmt.Printf("\n%s %s\n", TxnID, rpcStr)
 	if op.Type == kvs.READ || op.Type == kvs.WRITE {
 		client := cli.Client.getShard(op.Key)
 		err = client.RpcClient.Call(rpcStr, request, response)

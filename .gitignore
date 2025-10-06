@@ -35,3 +35,4 @@ go.work.sum
 .idea/
 .vscode/
 __debug_*
+logs/latest
