@@ -231,7 +231,7 @@ func NewAccountingWorkload(id uint64, acctNum uint64, init float64, maxI int) *A
 }
 
 // returns true if txn should commit, false if should abort
-func (w AccountingWorkload) Next(client ClientRpc) bool {
+func (w *AccountingWorkload) Next(client ClientRpc) bool {
 
 	abort := func() {
 		w.txnCtr++
