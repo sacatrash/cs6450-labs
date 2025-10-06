@@ -64,7 +64,7 @@ func (kv *KVService) printStats() {
 	abort_retry := diff.abort_retry.Load()
 	abort_error := diff.abort_error.Load()
 
-	fmt.Printf("get/s %0.2f\nput/s %0.2f\nops/s %0.2f\ncommits/s %0.2f\naborts/s %0.2f\naborts/s (retries) %0.2f\naborts/s (error) %0.2f\n",
+	fmt.Printf("get/s %0.2f\nput/s %0.2f\nops/s %0.2f\ncommits/s %0.2f\naborts/s %0.2f\naborts/s (retries) %0.2f\naborts/s (error) %0.2f\n\n",
 		float64(gets)/deltaS,
 		float64(puts)/deltaS,
 		float64(gets+puts)/deltaS,

@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
@@ -89,19 +88,9 @@ func main() {
 		}
 	*/
 
-	cli := &Client{}
-	cli.Name = uuid.New().String()
-	cli.Hosts = make([]*kvs.ServerClientConn, len(hosts))
-	cli.opsDone = &atomic.Uint64{}
-
-	for i, addr := range hosts {
-		cli.Hosts[i] = Dial(addr)
-	}
-
 	for i := range hosts {
 		for g := 0; g < *host_generators; g++ {
 			clientId := i*(*host_generators) + g
-			txnCli := &TxnClient{cli, ""}
 			go func(clientId int, addrs []string) {
 				var work_load kvs.DefaultWorkload
 				if *workload == "Accounting" {
@@ -109,7 +98,7 @@ func main() {
 				} else {
 					work_load = kvs.NewTxnWorkload(*workload, *theta)
 				}
-				txnCli.RunClient(clientId, &done, work_load, resultsCh)
+				RunTxnClient(clientId, hosts, &done, work_load, resultsCh)
 			}(clientId, hosts)
 		}
 	}

@@ -24,13 +24,20 @@ type keyLock struct {
 }
 
 type txState struct {
-	id kvs.TxID
+	//if true, forces this commit to abort on the next rpc
+	abort bool
 	//writes map[string]string
 	writes sync.Map
 	//s_held map[string]*keyLock
 	s_held sync.Map
 	//x_held map[string]*keyLock
 	x_held sync.Map
+	//0=ignore (break serializability); 1=abort write; 2=abort all reads; 3=snapshot (currently breaks serializability)
+	readWriteLockStrat int
+
+	//if readWriteLockStrat == 3, this holds a copy of the keys upon Begin
+	//do not use to store modified values mid-txn- use writes field instead
+	readState sync.Map
 }
 
 // use the KVService mutex when we need to add/remove keys
@@ -39,7 +46,7 @@ type KVService struct {
 	//sync.Mutex
 	//mp        map[string]*atomic.Value
 	mu        sync.Mutex //mutex used during lock acquisition/release
-	mp        sync.Map
+	mp        sync.Map   //the data being stored map[string]*Content
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
@@ -171,11 +178,18 @@ func (kv *KVService) CreateTxState(txid kvs.TxID) *txState {
 		return nil
 	}
 	state = &txState{
-		id:     txid,
-		writes: sync.Map{},
-		s_held: sync.Map{},
-		x_held: sync.Map{},
+		abort:              false,
+		writes:             sync.Map{},
+		s_held:             sync.Map{},
+		x_held:             sync.Map{},
+		readWriteLockStrat: 1,
+		readState:          sync.Map{},
 	}
+	//copy all values into readState
+	kv.mp.Range(func(key, value any) bool {
+		state.readState.Store(key, value)
+		return true
+	})
 	kv.txs.Store(txid, state)
 	return state
 }
@@ -190,31 +204,54 @@ func (kv *KVService) tryAcquireS(tx *txState, key string) bool {
 		return false
 	}
 	lok.readers.Store(tx, nil)
+	lok.readerCount.Add(1)
 	tx.s_held.Store(key, lok)
 	return true
 }
 
-/*
- */
+// try to acquire a write lock if there are no other readers
 func (kv *KVService) tryAcquireX(tx *txState, key string) bool {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	lok := kv.getOrCreateLockState(key)
 	if lok.writer == tx {
+		//already acquired
 		return true
 	}
 	if lok.writer != nil && lok.writer != tx {
+		//different writer
 		kv.stats.abort_retry.Add(1)
 		return false
 	}
 	if lok.readerCount.Load() > 0 {
-		if _, ok := lok.readers.Load(tx); !ok {
+		//we must check that it holds a read lock
+		if _, ok := lok.readers.Load(tx); !ok || (tx.readWriteLockStrat == 1 && lok.readerCount.Load() > 1) {
+			//if not only reader, abort self
 			kv.stats.abort_retry.Add(1)
 			return false
+		} else if lok.readerCount.Load() > 1 && tx.readWriteLockStrat == 2 {
+			lok.readers.Range(func(k, value any) bool {
+				//if not only reader, abort all other readers
+				lok.readers.Delete(k)
+				lok.readerCount.Store(lok.readerCount.Load() - 1)
+				k.(*txState).s_held.Delete(key)
+				k.(*txState).abort = true
+				return true
+			})
+		} else {
+			if tx.readWriteLockStrat == 3 {
+				//if using snapshots, only allow write if snapshot == current
+				tmp, ok := tx.readState.Load(key)
+				live, ok2 := kv.mp.Load(key)
+				if ok && ok2 && tmp != live {
+					kv.stats.abort_retry.Add(1)
+					return false
+				}
+			}
+			lok.readers.Delete(tx)
+			lok.readerCount.Store(lok.readerCount.Load() - 1)
+			tx.s_held.Delete(key)
 		}
-		lok.readers.Delete(tx)
-		lok.readerCount.Store(lok.readerCount.Load() - 1)
-		tx.s_held.Delete(key)
 	}
 	lok.writer = tx
 	tx.x_held.Store(key, lok)
@@ -240,6 +277,7 @@ func (kv *KVService) txCleanUp(txid kvs.TxID) {
 			//remove self from all read locks
 			vl := v.(*keyLock)
 			vl.readers.Delete(state)
+			vl.readerCount.Store(vl.readerCount.Load() - 1)
 			return true
 		})
 		kv.txs.Delete(txid)
@@ -278,6 +316,10 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.Response) error 
 // return a staged value if there is one
 func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse) error {
 	state, sOk := kv.getTx(request.GetTxID())
+	if state.abort {
+		response.Error = kvs.ERROR_SERVER_ABT
+		return nil
+	}
 	if kv.debug {
 		kv.mu.Lock()
 		fmt.Printf("GET id: \n%s\n", request.GetTxID())
@@ -288,7 +330,7 @@ func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse)
 		kv.DoBadTxID(request.GetTxID())
 		return nil
 	}
-	//if we have write lock, clear to proceed wit hread
+	//if we have write lock, clear to proceed with read
 	if v, ok := state.writes.Load(request.Key); ok {
 		kv.stats.gets.Add(1)
 		response.Value, response.Error = v.(string), ""
@@ -304,14 +346,27 @@ func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse)
 	}
 
 	response.Error = ""
-	c := kv.getOrCreateContent(request.Key)
+	if state.readWriteLockStrat == 3 {
+		c, ok := state.readState.Load(request.Key)
+		if ok {
+			response.Value = c.(*kvs.Content).Value
+		} else {
+			response.Value = ""
+		}
+	} else {
+		c := kv.getOrCreateContent(request.Key)
+		response.Value = c.Value
+	}
 	kv.stats.gets.Add(1)
-	response.Value = c.Value
 	return nil
 }
 
 func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.Response) error {
 	state, sOk := kv.getTx(request.GetTxID())
+	if state.abort {
+		response.Error = kvs.ERROR_SERVER_ABT
+		return nil
+	}
 	if kv.debug {
 		kv.mu.Lock()
 		fmt.Printf("PUT id: \n%s\n", request.GetTxID())
@@ -337,6 +392,10 @@ func (kv *KVService) TxCommit(request *kvs.TxRequest, response *kvs.Response) er
 	//kv.mu.Lock()
 	//defer kv.mu.Unlock()
 	state, ok := kv.getTx(request.GetTxID())
+	if state.abort {
+		response.Error = kvs.ERROR_SERVER_ABT
+		return nil
+	}
 	if kv.debug {
 		kv.mu.Lock()
 		fmt.Printf("COMMIT id: \n%s\n", request.GetTxID())

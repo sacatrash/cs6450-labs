@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"sync/atomic"
 
+	"github.com/google/uuid"
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
@@ -13,8 +14,8 @@ type txParticipant map[int]bool
 
 // TxnClient is of interface GenericRpc and ClientTxnRpc, not ClientRpc
 type TxnClient struct {
-	Client *Client
-	TxID   kvs.TxID
+	Client
+	TxID kvs.TxID
 }
 
 func (c TxnClient) ShouldBatchRPCs() bool {
@@ -163,7 +164,16 @@ func (cli *TxnClient) BeginTxnRPC(Tx kvs.TxID) chan kvs.ResponseInterface {
 	return ret
 }
 
-func (cli *TxnClient) RunClient(id int, done *atomic.Bool, workload kvs.DefaultWorkload, resultsCh chan<- uint64) {
+func RunTxnClient(id int, hosts []string, done *atomic.Bool, workload kvs.DefaultWorkload, resultsCh chan<- uint64) {
+
+	cli := &TxnClient{}
+	cli.Name = uuid.New().String()
+	cli.Hosts = make([]*kvs.ServerClientConn, len(hosts))
+	cli.opsDone = &atomic.Uint64{}
+
+	for i, addr := range hosts {
+		cli.Hosts[i] = Dial(addr)
+	}
 
 	for !done.Load() {
 		//initialize txn

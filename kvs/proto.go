@@ -26,6 +26,7 @@ const (
 	ERROR_BAD_TXID      ResponseError = "Incorrect TxID"
 	ERROR_NOT_PROCESSED ResponseError = "RPC pending processing in batch."
 	ERROR_OTHER         ResponseError = "Unknown error."
+	ERROR_SERVER_ABT    ResponseError = "Server aborted transaction."
 )
 
 type Op struct {

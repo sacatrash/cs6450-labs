@@ -37,3 +37,9 @@ Guarantees:
 * because of the above guarantee, commits can be processed in parallel if they do not depend on another's locks being held
 * if any lock is locked, the commit will get the lock at the same order as the other servers, in the order by timestamp.
 * Only one timestamp may write to a key at any time.
+
+## Structure 2: snapshots
+
+If a transaction consists of all reads, a serializable schedule can be obtained by using a snapshot of the current data at the start of a transaction.
+
+If a transaction consists of a write, it can be serialized if the written key was not committed to, ie the value has remained the same. Note that write lock rules still apply.

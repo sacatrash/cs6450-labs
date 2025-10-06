@@ -263,6 +263,8 @@ func (w *AccountingWorkload) Next(client ClientRpc) bool {
 			abort()
 			return false
 		}
+
+		ok3 := <-client.PutRPC(w.srcAcct, strconv.FormatFloat(srcBal-100, 'f', -1, 64))
 		dstBalGet := <-client.GetRPC(w.dstAcct)
 
 		strBal = dstBalGet.Get()
@@ -280,18 +282,16 @@ func (w *AccountingWorkload) Next(client ClientRpc) bool {
 		dstBal, ok2 := strconv.ParseFloat(strBal, 64)
 
 		//transfer balance src->dst
-		ok3 := (<-client.PutRPC(w.srcAcct, strconv.FormatFloat(srcBal-100, 'f', -1, 64))).IsOk()
 		ok4 := (<-client.PutRPC(w.dstAcct, strconv.FormatFloat(dstBal+100, 'f', -1, 64))).IsOk()
 
-		if ok3 && ok4 && ok2 == nil && dstBalGet.IsOk() {
+		if ok3.IsOk() && ok4 && ok2 == nil && dstBalGet.IsOk() {
 			return true
 		} else {
 			abort()
 			return false
 		}
 	} else {
-		defer func() { w.txnCtr = (rand.Int() % w.maxIter) }()
-		fmt.Print("ASSERT CHECK... ")
+		//fmt.Print("ASSERT CHECK... ")
 		var i uint64
 		var total float64
 		for i = 0; i < uint64(w.records); i++ {
@@ -307,7 +307,7 @@ func (w *AccountingWorkload) Next(client ClientRpc) bool {
 		if total != expected {
 			fmt.Printf("ASSERT FAILED: expected total %f actual total %f.\n\n", expected, total)
 		}
-
+		w.txnCtr = (rand.Int() % w.maxIter)
 		return true
 	}
 
