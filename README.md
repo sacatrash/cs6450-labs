@@ -33,6 +33,8 @@ Required README.md Sections
 
     0 obviously breaks serializability. In testing, 3 also breaks serializability, though we believe in theory it shouldn't, so there may be an issue with how this was implemented. 2 and 3 maintain strict serializibility at the cost of more retry aborts, with no discernable difference with the accounting workload. 2 yields the worst ops/s.
 
+    Client side retry was also implemented, where the client can retry an RPC after a delay upon receiving a lock error. This did not yield any improvement so it's currently set to only delay upon a lock error, with no retry.
+
     In deadlocks.md is an outline of a potential timestamp system that was discussed but not implemented. The idea of this system to not depend heavily on sychronized clocks, was to queue transactions and commit the earliest recorded one, aborting transactions if they showed older than the oldest or if they were queued for too long as the last transaction. 
 
 3. Reproducibility [a few clear steps]
