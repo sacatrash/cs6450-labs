@@ -3,55 +3,45 @@ Required README.md Sections
 1. Results [1 to 2 paragraphs]
 
     Final throughput numbers:
-        node0 median 2572209 op/s
-        node1 median 2812553 op/s
+        Serializability check passes.
 
-        total 5384762 op/s
+        W/ -generators=100
 
-    Observed via htop, running on node0, the 16 threads can be observed to utilize about 30% usage while running, while memory utilization on node0 is not significant. Network traffic on node0 constituted to about 9 GB data, with 8 GB transmitted to clients and 1 GB received. 
+        node0 median 453 op/s
+        node1 median 547 op/s
 
-    Our approach should scale linearly with more nodes, as we designed the client-server architecture to shard, where clients send data to one server instead of to all servers. As long as if the nu                                                   mber of servers scales proportionally with clients, we believe a proportional performance increase should be observed. 
+        total 999 op/s
 
-Performance Grading Scale (YCSB-B, θ = 0.99) (only one component of the scoring rubric):
+        We also observe about 250-300 commits/s and 10-15 aborts/s.
 
-    80% grade: ≥ 400,000 op/s
-    82% grade: ≥ 800,000 op/s
-    88% grade: ≥ 1,600,000 op/s
-    92% grade: ≥ 3,200,000 op/s
-    95% grade: ≥ 6,400,000 op/s
-    100% grade: ≥ 12,800,000 op/s
+    With strict serializability checking, performance is noticably low compared to assignment 1, which makes sense as we are no longer batching, but also aborts reduce the ops. This is with the default theta of .99.
+
+    When theta=0, we observe a total throughput of around 700 ops/s, with zero aborts. With theta=.5, throughput is about 750 ops/s with again 0 aborts. At theta=.8, observed results yield 718 ops/s and less than 5 aborts/s. With theta=1, node0 median reportely is 906 ops/s, node1 26298, with a total 27204 ops/s. The commit to abort ratio varied widely per second.
+
+    We tested by implementing Visual Studio Code tasks to assist with smaller scale debugging, then ran the sh file for multi machine tests. Serializability was tested with the bank transfer workload (Accounting), with assertions printed if an incorrect balance was detected at random.
 
 2. Design [3 to 4 paragraphs]
 
-    Our current server-client architecture utilizes a 4096 element buffer to batch operations into grouped RPC calls. The buffer is flushed upon either filling up, or after a specified amount of time has passed. We tweaked the time vs. buffer capacity to maximize data getting sent but not to be significantly delayed by long operations.
+    We overhauled a lot of the prior server and client architecture to make it simpler and more modular. Structurally, the numerous structs for different types of requests and responses were simplified into a few depending on what the RPC actually needed. Client code was adapted into interfaces to allow for PA1 to be run alongside PA2 in theory (granted PA1 was updated to the newer codebase). The workload now calls RPCs directly, with the option of running them asychronously, as each RPC returns a channel which writes response value. Client connections were moved prior to workload generation, so that only one connection to each host had to be established instead of one connection per generator.
 
-    We increased the flush interval "ttlFlush" to 20 ms so batches fill up before sending. Previously we flushed too often, creating small batches and lower throughput. Larger batches cut RPC overhead and improved throughput.We also added async sending with double buffering. One buffer sends while the buffer fills. This avoids client idle time and keeps requests flowing without waiting on network round trips. 
+    The transactional model uses a 2PL/2PC method with proven strict serializability. We use a shared read lock and a single write lock on each key. There is a flag in the code which can vary the behavior of handling write lock attempts when read locks are present:
 
-    On the server, we replaced the global lock with Go’s sync.Map so most reads and updates can happen at the same time rather than waiting in line. We only take a lock when adding a brand-new key. Reads and updates to existing keys run in parallel and stay fast.
+    0=no special handling. If no write lock is present, the transaction acquires the write lock
+    1=abort write. If any read lock is present other than the transaction's own lock, the write aborts
+    2=abort reads. If any read lock is present other than the transaction's own lock, the reads abort
+    3=snapshot. Upon calling begin, a snapshot of all keys is created which a txid would read from. All reads read from the snapshot, or previously recorded written values of the transaction. If there is a write, the write is aborted if the current committed value does not match the snapshot's value.
 
-    The system design incorporates sharding across the servers. Each client uses a simple hash function on the operation’s key to determine which server is responsible for handling it. This ensures that requests are distributed evenly and prevents any single server from becoming overloaded. By spreading load across shards, the architecture achieves higher aggregate throughput, since multiple servers can process operations in parallel.              
-    
+    0 obviously breaks serializability. In testing, 3 also breaks serializability, though we believe in theory it shouldn't, so there may be an issue with how this was implemented. 2 and 3 maintain strict serializibility at the cost of more retry aborts, with no discernable difference with the accounting workload.
 
 3. Reproducibility [a few clear steps]
 
     Hardware setup:
     Configure and run `run-cluster.sh`. Our configuration requires no special OS level changes and can be run on a small-lan cluster in cloudlab.
 
+    It is recommended to set the host_generators argument for clients to a value between 100-500, as there is available capacity observed on clients for more workload generation. This may be suggestive instead of an unkown bottleneck.
+
+    The transfer workload can be passed with the Accounting workload parameter. When done, parameters related to the other workload are ignored.
+
 4. Reflections [1 to 4 paragraphs]
 
-   We learned a lot about the how RPC works, and about techniques which can be used to optimize workloads in a distributed system sense. We also learned about go, and the challenges of debugging and testing across a cluster of systems. I believe we can improve next time with better tools to profile performance, specifically recording results as we iterate to compare improvements and setbacks. People on the class discord server helped us with clarifications on the assignment requirements and with ideas on where to begin optimization.
- 
-    
-    The first thing we tried was integrating a 64 byte batch buffer to group operations and reduce the number of locks/unlocks. This resultedin about 400k-800k ops/s, up to 1 mil. By adjusting the buffer to up to 4096 elements, we are now able to achieve around 2 mil.We then replaced the stats with atomic types, removing the need to lock whenever updating the stats. We later applied this changeto the map, using go's sync.map structure. This change likely improved our results by about 20k, though we didn't precisely compare.
-    
-    One approach that did not work as well as expected was using very short flush intervals. While this minimized latency, it caused the client to send many small batches, which significantly reduced throughput.
-
-    There were some other things we tried but ended up abandoning as they didn't yield signfificant benefit. We tried to improve upon the batching structure by implementing a queue on the server, which would manually schedule processing RPCs with the idea that we may be able to achieve a higher average ops/s across all nodes by distributing the workload. While sound in theory, in practice we were only able to accomplish a single-threaded queue. If we were to multithread it, we would have run into complications with locks between the different queues and the different batches to run.
-
-    Another thing we attempted was getting around HTTP being used by RPC, by utilizing gRPC. While a solid protocol and simple to implement on top of our existing code, the end result saw lower ops/s by about 40k. We think that, given the local environment that the nodes run, as well as the type of data being processed, gRPC/protobuf was less ideal for handling batches of data over the network.
-
-    For further improvements, it may be interesting to look more into gRPC and see if HTTP/2 or /3 can work for an improvement. Additionally, the queuing system could evolve into a transactional architecture, and with multithreading support could improve performance while opening functionality for server-server replication to occur.
-
-    Andy Herbert: I set up the initial cloudlab experiment, and looked into the queuing and gRPC methods of optimization which ended up not working. I also looked into and implemented the atomic datatypes, and improved batch handling by profiling runs with different sizes to find an ideal buffer size. Finally, Andy profiled runs to record the network and CPU utilization recorded in the readme.
-
-    Jose Alex Garcia: I contributed primarily to the client side design and performance improvements. This included implementing the batching strategy, adjusting the flush interval to improve throughput, and helping integrate asynchronous sending with double-buffering. I also worked on analyzing the effect of sharding across servers and documented how these design changes impacted overall performance.
+   

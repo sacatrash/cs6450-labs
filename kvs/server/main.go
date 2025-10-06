@@ -330,7 +330,7 @@ func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse)
 		fmt.Printf("GET id: \n%s\n", request.GetTxID())
 		kv.mu.Unlock()
 	}
-	//if we have write lock, clear to proceed with read
+	//if we have a previous read, read from self
 	if v, ok := state.writes.Load(request.Key); ok {
 		kv.stats.gets.Add(1)
 		response.Value, response.Error = v.(string), ""
