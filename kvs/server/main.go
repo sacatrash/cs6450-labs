@@ -50,7 +50,8 @@ type KVService struct {
 	//txs   map[kvs.TxID]*txState
 	txs sync.Map
 
-	debug bool
+	debug      bool
+	debugError bool
 }
 
 func (kv *KVService) DebugPrintKeys() {
@@ -62,7 +63,7 @@ func (kv *KVService) DebugPrintKeys() {
 
 func (kv *KVService) DoBadTxID(txid kvs.TxID) {
 	kv.stats.abort_error.Add(1)
-	if kv.debug {
+	if kv.debugError {
 		fmt.Printf("\nBAD TXID: %s\nCURRENT KEYS:\n", txid)
 		kv.DebugPrintKeys()
 	}
@@ -144,7 +145,8 @@ func NewKVService() *KVService {
 	kv.lastPrint = time.Now()
 	kv.stats.Init()
 	kv.prevStats.Init()
-	kv.debug = true
+	kv.debug = false
+	kv.debugError = true
 	return kv
 }
 

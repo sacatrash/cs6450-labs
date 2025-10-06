@@ -33,29 +33,23 @@ func (c TxnClient) GetOpsDone() *atomic.Uint64 {
 	return c.Client.GetOpsDone()
 }
 
-func (c TxnClient) GetTxnID() kvs.TxID {
+func (c *TxnClient) GetTxnID() kvs.TxID {
 	return c.TxID
 }
 
-func (c TxnClient) SetTxnID(newId kvs.TxID) {
+func (c *TxnClient) SetTxnID(newId kvs.TxID) {
 	c.TxID = newId
 }
 
-func (c TxnClient) InvalidateTxnID() {
+func (c *TxnClient) InvalidateTxnID() {
 	c.TxID.Invalidate()
-}
-
-func (cli TxnClient) getShard(key string) *kvs.ServerClientConn {
-	return cli.Hosts[kvs.ShardForKey(key, len(cli.Hosts))]
 }
 
 // performs one RPC in sync
 // if RPC is commit/abort/begin, performs across all shards
 // and returns an empty response unless there was an error,
 // in which case returns the last error response
-func (c TxnClient) DoRPC(op *kvs.Op) any {
-	var cli kvs.ClientTxnRpc
-	cli = kvs.ClientTxnRpc(c)
+func (cli *TxnClient) DoRPC(op *kvs.Op) any {
 	TxnID := cli.GetTxnID()
 	if TxnID == "" {
 		return &kvs.Response{Error: kvs.ERROR_BAD_TXID}
@@ -114,26 +108,22 @@ func (c TxnClient) DoRPC(op *kvs.Op) any {
 	return response
 }
 
-func (c TxnClient) GetRPC(key string) chan kvs.DataResponse {
-	var cli kvs.ClientTxnRpc
-	cli = kvs.ClientTxnRpc(c)
+func (cli TxnClient) GetRPC(key string) chan kvs.DataResponse {
 	ret := make(chan kvs.DataResponse)
 	go func() {
 		v := cli.DoRPC(&kvs.Op{Type: kvs.READ, Key: key})
-		if v.(*kvs.Response).IsOk() {
+		if v.(kvs.DataResponse).IsOk() {
 			ret <- v.(kvs.DataResponse)
 		} else {
 			tmp := &kvs.GetResponse{}
-			tmp.Response.Error = v.(*kvs.Response).Error
+			tmp.Response.Error = v.(*kvs.GetResponse).Error
 			ret <- tmp
 		}
 	}()
 	return ret
 }
 
-func (c TxnClient) PutRPC(key string, val string) chan kvs.ResponseInterface {
-	var cli kvs.ClientTxnRpc
-	cli = kvs.ClientTxnRpc(c)
+func (cli *TxnClient) PutRPC(key string, val string) chan kvs.ResponseInterface {
 	ret := make(chan kvs.ResponseInterface)
 	go func() {
 		v := cli.DoRPC(&kvs.Op{Type: kvs.WRITE, Key: key, Value: val})
@@ -142,35 +132,29 @@ func (c TxnClient) PutRPC(key string, val string) chan kvs.ResponseInterface {
 	return ret
 }
 
-func (c TxnClient) AbortTxnRPC() chan kvs.ResponseInterface {
-	var cli kvs.ClientTxnRpc
-	cli = kvs.ClientTxnRpc(c)
+func (cli *TxnClient) AbortTxnRPC() chan kvs.ResponseInterface {
 	ret := make(chan kvs.ResponseInterface)
 	go func() {
 		v := cli.DoRPC(&kvs.Op{Type: kvs.ABORT})
 		ret <- v.(kvs.ResponseInterface)
-		cli.InvalidateTxnID()
+		cli.TxID.Invalidate()
 	}()
 	return ret
 }
 
-func (c TxnClient) CommitTxnRPC() chan kvs.ResponseInterface {
-	var cli kvs.ClientTxnRpc
-	cli = kvs.ClientTxnRpc(c)
+func (cli *TxnClient) CommitTxnRPC() chan kvs.ResponseInterface {
 	//once commit is called we cannot abort
 	ret := make(chan kvs.ResponseInterface)
 	go func() {
 		v := cli.DoRPC(&kvs.Op{Type: kvs.COMMIT})
 		ret <- v.(kvs.ResponseInterface)
-		cli.InvalidateTxnID()
+		cli.TxID.Invalidate()
 	}()
 	return ret
 }
 
-func (c TxnClient) BeginTxnRPC(Tx kvs.TxID) chan kvs.ResponseInterface {
-	var cli kvs.ClientTxnRpc
-	cli = kvs.ClientTxnRpc(c)
-	cli.SetTxnID(Tx)
+func (cli *TxnClient) BeginTxnRPC(Tx kvs.TxID) chan kvs.ResponseInterface {
+	cli.TxID = Tx
 	ret := make(chan kvs.ResponseInterface)
 	go func() {
 		v := cli.DoRPC(&kvs.Op{Type: kvs.BEGIN})
@@ -179,15 +163,13 @@ func (c TxnClient) BeginTxnRPC(Tx kvs.TxID) chan kvs.ResponseInterface {
 	return ret
 }
 
-func (c *TxnClient) RunClient(id int, done *atomic.Bool, workload kvs.TxnWorkload, resultsCh chan<- uint64) {
-	var cli kvs.ClientTxnRpc
-	cli = kvs.ClientTxnRpc(c)
+func (cli *TxnClient) RunClient(id int, done *atomic.Bool, workload kvs.DefaultWorkload, resultsCh chan<- uint64) {
 
 	for !done.Load() {
 		//initialize txn
 		init := <-cli.BeginTxnRPC(kvs.GetNew(cli.GetName() + strconv.FormatInt(int64(id), 10)))
 
-		if cli.GetTxnID().IsValid() {
+		if cli.TxID.IsValid() {
 			if !init.IsOk() {
 				cli.AbortTxnRPC()
 				continue
@@ -198,6 +180,7 @@ func (c *TxnClient) RunClient(id int, done *atomic.Bool, workload kvs.TxnWorkloa
 			if !res {
 				cli.AbortTxnRPC()
 			} else {
+				cli.CommitTxnRPC()
 				cli.GetOpsDone().Add(1)
 			}
 		}

@@ -103,7 +103,7 @@ func main() {
 			clientId := i*(*host_generators) + g
 			txnCli := &TxnClient{cli, ""}
 			go func(clientId int, addrs []string) {
-				var work_load kvs.TxnWorkload
+				var work_load kvs.DefaultWorkload
 				if *workload == "Accounting" {
 					work_load = kvs.NewAccountingWorkload(uint64(clientId), uint64(len(hosts)**host_generators), 100, 50)
 				} else {

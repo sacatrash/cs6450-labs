@@ -9,7 +9,7 @@ import (
 )
 
 type DefaultWorkload interface {
-	Next(client *ClientTxnRpc) bool
+	Next(client ClientRpc) bool
 }
 
 type Workload struct {
@@ -96,7 +96,7 @@ func (w *Workload) Next(client ClientRpc) bool {
 }
 
 // same as above but using transactions instead
-func (w *TxnDefaultWorkload) Next(client ClientTxnRpc) bool {
+func (w *TxnDefaultWorkload) Next(client ClientRpc) bool {
 	for i := 0; i < 3; i++ {
 		key := strconv.FormatUint(w.keygen.Uint64()%w.records, 10)
 		isRead := w.gen.Uint64() < w.readThreshold
@@ -113,7 +113,6 @@ func (w *TxnDefaultWorkload) Next(client ClientTxnRpc) bool {
 			return false
 		}
 	}
-	<-client.CommitTxnRPC()
 	return true
 }
 
@@ -231,15 +230,10 @@ func NewAccountingWorkload(id uint64, acctNum uint64, init float64, maxI int) *A
 	return workload
 }
 
-type TxnWorkload interface {
-	Next(client ClientTxnRpc) bool
-}
-
-// returns true if txn was successful/didn't abort
-func (w AccountingWorkload) Next(client ClientTxnRpc) bool {
+// returns true if txn should commit, false if should abort
+func (w AccountingWorkload) Next(client ClientRpc) bool {
 
 	abort := func() {
-		<-client.AbortTxnRPC()
 		w.txnCtr++
 	}
 	if w.txnCtr > 0 {
@@ -290,7 +284,6 @@ func (w AccountingWorkload) Next(client ClientTxnRpc) bool {
 		ok4 := (<-client.PutRPC(w.dstAcct, strconv.FormatFloat(dstBal+100, 'f', -1, 64))).IsOk()
 
 		if ok3 && ok4 && ok2 == nil && dstBalGet.IsOk() {
-			<-client.CommitTxnRPC()
 			return true
 		} else {
 			abort()
@@ -307,7 +300,6 @@ func (w AccountingWorkload) Next(client ClientTxnRpc) bool {
 				tmp, _ := strconv.ParseFloat(v.Get(), 64)
 				total += tmp
 			} else {
-				<-client.AbortTxnRPC()
 				return false
 			}
 		}
@@ -316,7 +308,7 @@ func (w AccountingWorkload) Next(client ClientTxnRpc) bool {
 			fmt.Printf("ASSERT FAILED: expected total %f actual total %f.\n\n", expected, total)
 		}
 
-		return (<-client.CommitTxnRPC()).IsOk()
+		return true
 	}
 
 }

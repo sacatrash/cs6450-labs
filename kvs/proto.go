@@ -204,15 +204,4 @@ type ClientRpc interface {
 	GetHost(i int) *ServerClientConn
 	GetName() string
 	GetOpsDone() *atomic.Uint64
-	GetShard(key string) *ServerClientConn
-}
-
-type ClientTxnRpc interface {
-	ClientRpc
-	AbortTxnRPC() chan ResponseInterface
-	CommitTxnRPC() chan ResponseInterface
-	BeginTxnRPC(Tx TxID) chan ResponseInterface
-	GetTxnID() TxID
-	SetTxnID(newID TxID)
-	InvalidateTxnID()
 }
