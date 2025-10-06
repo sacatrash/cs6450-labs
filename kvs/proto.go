@@ -2,7 +2,10 @@ package kvs
 
 import (
 	"hash/fnv"
+	"net/rpc"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 const (
@@ -127,19 +130,12 @@ func (r GetResponse) Get() string {
 	return r.Value
 }
 
-/*
-type LockRequest struct {
-	locks []*sync.Mutex
-	ret   chan int
-}
-*/
-
 /*NEW WORKLOAD TRANSACTION RPC (REMOTE PROCEDURE CALLS) REQUEST AND RESPONSE STRUCTS */
 
 type TxID string
 
-func (t *TxID) IsValid() bool {
-	return *t != ""
+func (t TxID) IsValid() bool {
+	return t != ""
 }
 
 func (t *TxID) Invalidate() {
@@ -186,22 +182,37 @@ func (t TxRequest) GetTxID() TxID {
 
 // generic interface to handle the RPC of an Op
 type GenericRpc interface {
-	doRPC(op *Op) any
+	DoRPC(op *Op) any
 }
 
-//client related types
+// client related types
+type ServerClientConn struct {
+	RpcClient *rpc.Client
+	Dest      string
+	deadline  time.Time
+	sendq     []BatchOp
+	//op -> response chan
+	op2chan *sync.Map
+}
 
 // Interfaces define the types of RPCs which clients can send
 type ClientRpc interface {
+	GenericRpc
 	GetRPC(key string) chan DataResponse
 	PutRPC(key string, val string) chan ResponseInterface
 	ShouldBatchRPCs() bool //if true, batches RPCs when Get/Put called instead of calling outright
+	GetHost(i int) *ServerClientConn
+	GetName() string
+	GetOpsDone() *atomic.Uint64
+	GetShard(key string) *ServerClientConn
 }
 
 type ClientTxnRpc interface {
-	GetTxnRPC(key string, id TxID) chan DataResponse
-	PutTxnRPC(key string, val string, id TxID) chan ResponseInterface
-	AbortTxnRPC(id TxID) chan ResponseInterface
-	CommitTxnRPC(id TxID) chan ResponseInterface
-	BeginTxnRPC(id TxID) chan ResponseInterface
+	ClientRpc
+	AbortTxnRPC() chan ResponseInterface
+	CommitTxnRPC() chan ResponseInterface
+	BeginTxnRPC(Tx TxID) chan ResponseInterface
+	GetTxnID() TxID
+	SetTxnID(newID TxID)
+	InvalidateTxnID()
 }

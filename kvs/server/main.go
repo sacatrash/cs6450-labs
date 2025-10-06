@@ -15,13 +15,6 @@ import (
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
-type Stats struct {
-	puts    *atomic.Uint64
-	gets    *atomic.Uint64
-	commits *atomic.Uint64
-	aborts  *atomic.Uint64
-}
-
 type keyLock struct {
 	key string
 	//readers map[*txState]any
@@ -56,6 +49,23 @@ type KVService struct {
 	locks sync.Map
 	//txs   map[kvs.TxID]*txState
 	txs sync.Map
+
+	debug bool
+}
+
+func (kv *KVService) DebugPrintKeys() {
+	kv.txs.Range(func(key any, value any) bool {
+		fmt.Printf("%s\n", key)
+		return true
+	})
+}
+
+func (kv *KVService) DoBadTxID(txid kvs.TxID) {
+	kv.stats.abort_error.Add(1)
+	if kv.debug {
+		fmt.Printf("\nBAD TXID: %s\nCURRENT KEYS:\n", txid)
+		kv.DebugPrintKeys()
+	}
 }
 
 func newKeyLock(key string) *keyLock {
@@ -88,13 +98,6 @@ func (tx *txState) getXLockFromKey(key string) (*keyLock, bool) {
 		return nil, err
 	}
 	return tmp.(*keyLock), err
-}
-
-func (s *Stats) Init() {
-	s.puts = new(atomic.Uint64)
-	s.gets = new(atomic.Uint64)
-	s.commits = new(atomic.Uint64)
-	s.aborts = new(atomic.Uint64)
 }
 
 func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatch) error {
@@ -132,19 +135,6 @@ func (kv *KVService) Batch(request *kvs.RequestBatch, response *kvs.ResponseBatc
 	return nil
 }
 
-func (s *Stats) Sub(prev *Stats) Stats {
-	r := Stats{}
-	r.puts = new(atomic.Uint64)
-	r.gets = new(atomic.Uint64)
-	r.commits = new(atomic.Uint64)
-	r.aborts = new(atomic.Uint64)
-	r.puts.Store(s.puts.Load() - prev.puts.Load())
-	r.gets.Store(s.gets.Load() - prev.gets.Load())
-	r.commits.Store(s.commits.Load() - prev.commits.Load())
-	r.aborts.Store(s.aborts.Load() - prev.aborts.Load())
-	return r
-}
-
 // EDITED
 func NewKVService() *KVService {
 	kv := &KVService{}
@@ -154,6 +144,7 @@ func NewKVService() *KVService {
 	kv.lastPrint = time.Now()
 	kv.stats.Init()
 	kv.prevStats.Init()
+	kv.debug = true
 	return kv
 }
 
@@ -169,6 +160,8 @@ func (kv *KVService) getOrCreateLockState(key string) *keyLock {
 
 // returns nil if state with matching id already exists
 func (kv *KVService) CreateTxState(txid kvs.TxID) *txState {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 	state, ok := kv.getTx(txid)
 	if ok {
 		return nil
@@ -189,6 +182,7 @@ func (kv *KVService) tryAcquireS(tx *txState, key string) bool {
 	defer kv.mu.Unlock()
 	lok := kv.getOrCreateLockState(key)
 	if lok.writer != nil && lok.writer != tx {
+		kv.stats.abort_retry.Add(1)
 		return false
 	}
 	lok.readers.Store(tx, nil)
@@ -206,10 +200,12 @@ func (kv *KVService) tryAcquireX(tx *txState, key string) bool {
 		return true
 	}
 	if lok.writer != nil && lok.writer != tx {
+		kv.stats.abort_retry.Add(1)
 		return false
 	}
 	if lok.readerCount.Load() > 0 {
 		if _, ok := lok.readers.Load(tx); !ok {
+			kv.stats.abort_retry.Add(1)
 			return false
 		}
 		lok.readers.Delete(tx)
@@ -247,7 +243,6 @@ func (kv *KVService) txCleanUp(txid kvs.TxID) {
 }
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
 	kv.stats.gets.Add(1)
-
 	if value, ok := kv.mp.Load(request.Key); ok {
 		switch valueVal := value.(type) {
 		case string:
@@ -274,9 +269,13 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.Response) error 
 // read tx and check if it holds S or X.
 // return a staged value if there is one
 func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse) error {
-	state, sOk := kv.getTx(request.Tx)
+	state, sOk := kv.getTx(request.GetTxID())
+	if kv.debug {
+		fmt.Printf("GET id: \n%s\n", request.GetTxID())
+	}
 	if !sOk {
 		response.Error = kvs.ERROR_BAD_TXID
+		kv.DoBadTxID(request.GetTxID())
 		return nil
 	}
 	//if we have write lock, clear to proceed wit hread
@@ -302,8 +301,12 @@ func (kv *KVService) TxGet(request *kvs.TxGetRequest, response *kvs.GetResponse)
 }
 
 func (kv *KVService) TxPut(request *kvs.TxPutRequest, response *kvs.Response) error {
-	state, sOk := kv.getTx(request.Tx)
+	state, sOk := kv.getTx(request.GetTxID())
+	if kv.debug {
+		fmt.Printf("PUT id: \n%s\n", request.GetTxID())
+	}
 	if !sOk {
+		kv.DoBadTxID(request.GetTxID())
 		response.Error = kvs.ERROR_BAD_TXID
 		return nil
 	}
@@ -322,7 +325,11 @@ func (kv *KVService) TxCommit(request *kvs.TxRequest, response *kvs.Response) er
 	//kv.mu.Lock()
 	//defer kv.mu.Unlock()
 	state, ok := kv.getTx(request.GetTxID())
+	if kv.debug {
+		fmt.Printf("COMMIT id: \n%s\n", request.GetTxID())
+	}
 	if !ok {
+		kv.DoBadTxID(request.GetTxID())
 		response.Error = kvs.ERROR_BAD_TXID
 		return nil
 	}
@@ -343,7 +350,10 @@ func (kv *KVService) TxCommit(request *kvs.TxRequest, response *kvs.Response) er
 func (kv *KVService) TxAbort(request *kvs.TxRequest, response *kvs.Response) error {
 	//kv.mu.Lock()
 	//defer kv.mu.Unlock()
-	kv.txCleanUp(request.Tx)
+	if kv.debug {
+		fmt.Printf("ABORT id: \n%s\n", request.GetTxID())
+	}
+	kv.txCleanUp(request.GetTxID())
 	kv.stats.aborts.Add(1)
 	response.Error = ""
 	return nil
@@ -351,48 +361,21 @@ func (kv *KVService) TxAbort(request *kvs.TxRequest, response *kvs.Response) err
 
 // initiate a transaction
 func (kv *KVService) TxBegin(request *kvs.TxRequest, response *kvs.Response) error {
-	if !request.Tx.IsValid() {
+	if kv.debug {
+		fmt.Printf("BEGIN id: \n%s\n", request.GetTxID())
+	}
+	if !request.GetTxID().IsValid() {
+		kv.DoBadTxID(request.GetTxID())
 		response.Error = kvs.ERROR_BAD_TXID
 		return nil
 	}
-	if kv.CreateTxState(request.Tx) == nil {
+	if kv.CreateTxState(request.GetTxID()) == nil {
+		kv.DoBadTxID(request.GetTxID())
 		response.Error = kvs.ERROR_BAD_TXID
 		return nil
 	}
 	response.Error = ""
 	return nil
-}
-
-func (kv *KVService) printStats() {
-	//kv.Lock()
-	//locks no longer needed as we're using atomics for it now
-	stats := kv.stats
-	prevStats := kv.prevStats
-	kv.prevStats = Stats{}
-	kv.prevStats.Init()
-	kv.prevStats.gets.Store(stats.gets.Load())
-	kv.prevStats.puts.Store(stats.puts.Load())
-	kv.prevStats.commits.Store(stats.commits.Load())
-	kv.prevStats.aborts.Store(stats.aborts.Load())
-	now := time.Now()
-	lastPrint := kv.lastPrint
-	kv.lastPrint = now
-	//kv.Unlock()
-
-	diff := stats.Sub(&prevStats)
-	deltaS := now.Sub(lastPrint).Seconds()
-
-	gets := diff.gets.Load()
-	puts := diff.puts.Load()
-	commits := diff.commits.Load()
-	aborts := diff.aborts.Load()
-
-	fmt.Printf("get/s %0.2f\nput/s %0.2f\nops/s %0.2f\ncommits/s %0.2f\naborts/s %0.2f\n\n",
-		float64(gets)/deltaS,
-		float64(puts)/deltaS,
-		float64(gets+puts)/deltaS,
-		float64(commits)/deltaS,
-		float64(aborts)/deltaS)
 }
 
 func main() {

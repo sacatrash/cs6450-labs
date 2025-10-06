@@ -96,16 +96,16 @@ func (w *Workload) Next(client ClientRpc) bool {
 }
 
 // same as above but using transactions instead
-func (w *TxnDefaultWorkload) Next(client ClientTxnRpc, txid TxID) bool {
+func (w *TxnDefaultWorkload) Next(client ClientTxnRpc) bool {
 	for i := 0; i < 3; i++ {
 		key := strconv.FormatUint(w.keygen.Uint64()%w.records, 10)
 		isRead := w.gen.Uint64() < w.readThreshold
 		value := strings.Repeat("x", 128)
 		var res ResponseInterface
 		if isRead {
-			res = (<-client.GetTxnRPC(key, txid)).(ResponseInterface)
+			res = (<-client.GetRPC(key)).(ResponseInterface)
 		} else {
-			res = (<-client.PutTxnRPC(key, value, txid))
+			res = (<-client.PutRPC(key, value))
 		}
 
 		if !res.IsOk() {
@@ -113,7 +113,7 @@ func (w *TxnDefaultWorkload) Next(client ClientTxnRpc, txid TxID) bool {
 			return false
 		}
 	}
-	<-client.CommitTxnRPC(txid)
+	<-client.CommitTxnRPC()
 	return true
 }
 
@@ -232,53 +232,68 @@ func NewAccountingWorkload(id uint64, acctNum uint64, init float64, maxI int) *A
 }
 
 type TxnWorkload interface {
-	Next(client ClientTxnRpc, txid TxID) bool
+	Next(client ClientTxnRpc) bool
 }
 
 // returns true if txn was successful/didn't abort
-func (w AccountingWorkload) Next(client ClientTxnRpc, txid TxID) bool {
+func (w AccountingWorkload) Next(client ClientTxnRpc) bool {
 
+	abort := func() {
+		<-client.AbortTxnRPC()
+		w.txnCtr++
+	}
 	if w.txnCtr > 0 {
 		defer func() { w.txnCtr-- }()
 		//check balance, abort if not enough
-		srcBalGet := <-client.GetTxnRPC(w.srcAcct, txid)
+		srcBalGet := <-client.GetRPC(w.srcAcct)
 
 		strBal := srcBalGet.Get()
+
+		if !srcBalGet.IsOk() {
+			abort()
+			return false
+		}
 
 		//if first time, put initial balance
 		if strBal == "" {
 			strBal = strconv.FormatFloat(w.initAmt, 'f', -1, 64)
-			<-client.PutTxnRPC(w.srcAcct, strBal, txid)
+			<-client.PutRPC(w.srcAcct, strBal)
 		}
 
 		srcBal, ok1 := strconv.ParseFloat(strBal, 64)
 
-		if ok1 != nil || (!srcBalGet.IsOk()) || srcBal < 100 {
-			<-client.AbortTxnRPC(txid)
-			w.txnCtr++
+		if ok1 != nil || (!srcBalGet.IsOk()) {
+			abort()
+			return false
+		} else if srcBal < 100 {
+			abort()
 			return false
 		}
-		dstBalGet := <-client.GetTxnRPC(w.dstAcct, txid)
+		dstBalGet := <-client.GetRPC(w.dstAcct)
 
 		strBal = dstBalGet.Get()
+		if !dstBalGet.IsOk() {
+			abort()
+			return false
+		}
+
 		//if first time, put initial balance
 		if strBal == "" {
 			strBal = strconv.FormatFloat(w.initAmt, 'f', -1, 64)
-			<-client.PutTxnRPC(w.dstAcct, strBal, txid)
+			<-client.PutRPC(w.dstAcct, strBal)
 		}
 
 		dstBal, ok2 := strconv.ParseFloat(strBal, 64)
 
 		//transfer balance src->dst
-		ok3 := (<-client.PutTxnRPC(w.srcAcct, strconv.FormatFloat(srcBal-100, 'f', -1, 64), txid)).IsOk()
-		ok4 := (<-client.PutTxnRPC(w.dstAcct, strconv.FormatFloat(dstBal+100, 'f', -1, 64), txid)).IsOk()
+		ok3 := (<-client.PutRPC(w.srcAcct, strconv.FormatFloat(srcBal-100, 'f', -1, 64))).IsOk()
+		ok4 := (<-client.PutRPC(w.dstAcct, strconv.FormatFloat(dstBal+100, 'f', -1, 64))).IsOk()
 
 		if ok3 && ok4 && ok2 == nil && dstBalGet.IsOk() {
-			<-client.CommitTxnRPC(txid)
+			<-client.CommitTxnRPC()
 			return true
 		} else {
-			<-client.AbortTxnRPC(txid)
-			w.txnCtr++
+			abort()
 			return false
 		}
 	} else {
@@ -287,12 +302,12 @@ func (w AccountingWorkload) Next(client ClientTxnRpc, txid TxID) bool {
 		var i uint64
 		var total float64
 		for i = 0; i < uint64(w.records); i++ {
-			v := <-client.GetTxnRPC(strconv.FormatUint(i, 10), txid)
+			v := <-client.GetRPC(strconv.FormatUint(i, 10))
 			if v.IsOk() {
 				tmp, _ := strconv.ParseFloat(v.Get(), 64)
 				total += tmp
 			} else {
-				<-client.AbortTxnRPC(txid)
+				<-client.AbortTxnRPC()
 				return false
 			}
 		}
@@ -301,7 +316,7 @@ func (w AccountingWorkload) Next(client ClientTxnRpc, txid TxID) bool {
 			fmt.Printf("ASSERT FAILED: expected total %f actual total %f.\n\n", expected, total)
 		}
 
-		return (<-client.CommitTxnRPC(txid)).IsOk()
+		return (<-client.CommitTxnRPC()).IsOk()
 	}
 
 }

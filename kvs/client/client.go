@@ -10,7 +10,7 @@ import (
 )
 
 type Client struct {
-	Hosts []*ServerClientConn
+	Hosts []*kvs.ServerClientConn
 	Name  string
 	//Response -> Op
 	active *sync.Map
@@ -20,7 +20,7 @@ type Client struct {
 	opsDone  *atomic.Uint64
 }
 
-func (c Client) GetHost(i int) *ServerClientConn {
+func (c Client) GetHost(i int) *kvs.ServerClientConn {
 	return c.Hosts[i]
 }
 
@@ -43,7 +43,7 @@ const (
 )
 
 // performs one RPC in sync
-func (cli Client) doRPC(op *kvs.Op) any {
+func (cli Client) DoRPC(op *kvs.Op) any {
 	client := cli.getShard(op.Key)
 	var request any
 	var response any
@@ -54,20 +54,17 @@ func (cli Client) doRPC(op *kvs.Op) any {
 		request = &kvs.GetRequest{Key: op.Key}
 		response = &kvs.GetResponse{}
 		rpcStr = "KVService.Get"
-
-		break
 	case kvs.WRITE:
 		request = &kvs.PutRequest{Key: op.Key, Value: op.Value}
 		response = &kvs.Response{}
 		rpcStr = "KVService.Put"
-		break
 	case kvs.COMMIT:
 		panic("Client doesn't support COMMIT, use TxnClient")
 	case kvs.ABORT:
 		panic("Client doesn't support ABORT, use TxnClient")
 
 	}
-	err := client.rpcClient.Call(rpcStr, request, response)
+	err := client.RpcClient.Call(rpcStr, request, response)
 	if err != nil {
 		log.Fatal(err)
 		panic(err)
@@ -76,28 +73,28 @@ func (cli Client) doRPC(op *kvs.Op) any {
 	return response
 }
 
-func (cli *Client) GetRPC(key string) chan kvs.DataResponse {
+func (cli Client) GetRPC(key string) chan kvs.DataResponse {
 	ret := make(chan kvs.DataResponse)
 	op := kvs.Op{Key: key, Type: kvs.READ}
 	if cli.ShouldBatchRPCs() {
 		cli.waiting.Store(ret, op)
 	} else {
 		go func() {
-			v, _ := cli.doRPC(&op).(kvs.DataResponse)
+			v, _ := cli.DoRPC(&op).(kvs.DataResponse)
 			ret <- v
 		}()
 	}
 	return ret
 }
 
-func (cli *Client) PutRPC(key string, value string) chan kvs.ResponseInterface {
+func (cli Client) PutRPC(key string, value string) chan kvs.ResponseInterface {
 	ret := make(chan kvs.ResponseInterface)
 	op := kvs.Op{Key: key, Value: value, Type: kvs.WRITE}
 	if cli.ShouldBatchRPCs() {
 		cli.waiting.Store(ret, op)
 	} else {
 		go func() {
-			v, _ := cli.doRPC(&op).(kvs.ResponseInterface)
+			v, _ := cli.DoRPC(&op).(kvs.ResponseInterface)
 			ret <- v
 		}()
 	}

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,21 +16,6 @@ import (
 )
 
 type HostList []string
-
-type BaseClient interface {
-	GetHost(i int) *ServerClientConn
-	GetName() string
-	GetOpsDone() *atomic.Uint64
-}
-
-type ServerClientConn struct {
-	rpcClient *rpc.Client
-	Dest      string
-	deadline  time.Time
-	sendq     []kvs.BatchOp
-	//op -> response chan
-	op2chan *sync.Map
-}
 
 func (h *HostList) String() string {
 	return strings.Join(*h, ",")
@@ -42,17 +26,17 @@ func (h *HostList) Set(value string) error {
 	return nil
 }
 
-func (cli *Client) getShard(key string) *ServerClientConn {
+func (cli *Client) getShard(key string) *kvs.ServerClientConn {
 	return cli.Hosts[kvs.ShardForKey(key, len(cli.Hosts))]
 }
 
-func Dial(addr string) *ServerClientConn {
+func Dial(addr string) *kvs.ServerClientConn {
 	rpcClient, err := rpc.DialHTTP("tcp", addr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	return &ServerClientConn{rpcClient: rpcClient, Dest: addr}
+	return &kvs.ServerClientConn{RpcClient: rpcClient, Dest: addr}
 }
 
 /*EDIT main*/
@@ -62,12 +46,9 @@ func main() {
 	flag.Var(&hosts, "hosts", "Comma-separated list of host:ports to connect to")
 	theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
 	//INCLUDE XFER BELOW
-	workload := flag.String("workload", "Accounting", "Workload type (YCSB-A, YCSB-B, YCSB-C, Accounting)")
+	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C, Accounting)")
 	//addition
 	defaultHosts := 2
-	if *workload == "Accounting" {
-		defaultHosts = 1
-	}
 	host_generators := flag.Int("host_generators", defaultHosts, "generators per host")
 
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run. Set to 0 for infinite run.")
@@ -108,9 +89,9 @@ func main() {
 		}
 	*/
 
-	cli := &TxnClient{}
+	cli := &Client{}
 	cli.Name = uuid.New().String()
-	cli.Hosts = make([]*ServerClientConn, len(hosts))
+	cli.Hosts = make([]*kvs.ServerClientConn, len(hosts))
 	cli.opsDone = &atomic.Uint64{}
 
 	for i, addr := range hosts {
@@ -120,15 +101,15 @@ func main() {
 	for i := range hosts {
 		for g := 0; g < *host_generators; g++ {
 			clientId := i*(*host_generators) + g
-
+			txnCli := &TxnClient{cli, ""}
 			go func(clientId int, addrs []string) {
 				var work_load kvs.TxnWorkload
 				if *workload == "Accounting" {
-					work_load = kvs.NewAccountingWorkload(uint64(clientId), 10, 100, 50)
+					work_load = kvs.NewAccountingWorkload(uint64(clientId), uint64(len(hosts)**host_generators), 100, 50)
 				} else {
 					work_load = kvs.NewTxnWorkload(*workload, *theta)
 				}
-				cli.runTxnClient(clientId, &done, work_load, resultsCh)
+				txnCli.RunClient(clientId, &done, work_load, resultsCh)
 			}(clientId, hosts)
 		}
 	}
