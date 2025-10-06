@@ -15,6 +15,11 @@ import (
 	"github.com/rstutsman/cs6450-labs/kvs"
 )
 
+const (
+	//0=ignore (break serializability); 1=abort write; 2=abort all reads; 3=snapshot (currently breaks serializability)
+	WRITE_LOCK_TYPE = 3
+)
+
 type keyLock struct {
 	key string
 	//readers map[*txState]any
@@ -182,7 +187,7 @@ func (kv *KVService) CreateTxState(txid kvs.TxID) *txState {
 		writes:             sync.Map{},
 		s_held:             sync.Map{},
 		x_held:             sync.Map{},
-		readWriteLockStrat: 1,
+		readWriteLockStrat: WRITE_LOCK_TYPE,
 		readState:          sync.Map{},
 	}
 	//copy all values into readState
