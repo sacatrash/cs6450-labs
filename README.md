@@ -48,4 +48,8 @@ Required README.md Sections
 
 4. Reflections [1 to 4 paragraphs]
 
-   
+    We learned about the challenges around transactional systems and serializability. There were many systems which on paper may appear to be simple solutions, like timestamps or snapshotting, yet in practice reveal issues and complications that could be difficult to anticipate.
+
+    ...
+
+    Andy Herbert worked considerably on refactoring the prior codebase to improve and streamline functionality. He also fixed multiple issues with the first implementation of the code, revising the transaction model to work with the serializability test in the assignment and making the workloads more directly control operations. Finally, he performed testing and adjustment to ensure serializability and attempt to increase performance.
