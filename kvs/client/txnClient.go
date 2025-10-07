@@ -192,6 +192,7 @@ func RunTxnClient(id int, cli TxnClient /*hosts []string,*/, done *atomic.Bool, 
 	for i, addr := range hosts {
 		cli.Hosts[i] = Dial(addr)
 	}*/
+	r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(id)*1_000_000_007))
 
 	for !done.Load() {
 		//initialize txn
@@ -211,6 +212,10 @@ func RunTxnClient(id int, cli TxnClient /*hosts []string,*/, done *atomic.Bool, 
 				<-cli.CommitTxnRPC()
 				cli.GetOpsDone().Add(1)
 			}
+		}
+		jitter := time.Duration(r.Int63n(int64(10 * time.Millisecond)))
+		if jitter > 0 {
+			time.Sleep(jitter)
 		}
 	}
 
