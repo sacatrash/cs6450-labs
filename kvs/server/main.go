@@ -418,8 +418,12 @@ func (kv *KVService) TxCommit(request *kvs.TxRequest, response *kvs.Response) er
 		return true
 	})
 
-	kv.txCleanUp(request.GetTxID())
-	kv.stats.commits.Add(1)
+	//kv.txCleanUp(request.GetTxID())
+	//kv.stats.commits.Add(1)
+	kv.txCleanUp((request.GetTxID()))
+	if request.Lead {
+		kv.stats.commits.Add(1)
+	}
 	response.Error = ""
 	return nil
 }
@@ -433,8 +437,12 @@ func (kv *KVService) TxAbort(request *kvs.TxRequest, response *kvs.Response) err
 		fmt.Printf("ABORT id: \n%s\n", request.GetTxID())
 		kv.mu.Unlock()
 	}
+	//kv.txCleanUp(request.GetTxID())
+	//kv.stats.aborts.Add(1)
 	kv.txCleanUp(request.GetTxID())
-	kv.stats.aborts.Add(1)
+	if request.Lead {
+		kv.stats.aborts.Add(1)
+	}
 	response.Error = ""
 	return nil
 }

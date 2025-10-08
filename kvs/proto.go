@@ -183,7 +183,8 @@ func (t TxPutRequest) GetTxID() TxID {
 
 type TxRequest struct {
 	Request
-	Tx TxID
+	Tx   TxID
+	Lead bool
 }
 
 func (t TxRequest) GetTxID() TxID {

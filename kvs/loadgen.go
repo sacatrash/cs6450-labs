@@ -96,6 +96,7 @@ func (w *Workload) Next(client ClientRpc) bool {
 }
 
 // same as above but using transactions instead
+/*
 func (w *TxnDefaultWorkload) Next(client ClientRpc) bool {
 	for i := 0; i < 3; i++ {
 		key := strconv.FormatUint(w.keygen.Uint64()%w.records, 10)
@@ -114,6 +115,20 @@ func (w *TxnDefaultWorkload) Next(client ClientRpc) bool {
 		}
 	}
 	return true
+}*/
+func (w *TxnDefaultWorkload) NextTriplet() []Op {
+	ops := make([]Op, 0, 3)
+	for i := 0; i < 3; i++ {
+		key := strconv.FormatUint(w.keygen.Uint64()%w.records, 10)
+		isRead := w.gen.Uint64() < w.readThreshold
+		value := strings.Repeat("x", 128)
+		if isRead {
+			ops = append(ops, Op{Type: READ, Key: key})
+		} else {
+			ops = append(ops, Op{Type: WRITE, Key: key, Value: value})
+		}
+	}
+	return ops
 }
 
 // Taken from Wikipedia.

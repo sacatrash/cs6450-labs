@@ -13,8 +13,10 @@ import (
 
 const (
 	//if more than 1, attempts to retry the rpc after a random delay
-	RETRY_COUNT    = 0
-	RETRY_MAX_TIME = .01
+	//RETRY_COUNT    = 0
+	//RETRY_MAX_TIME = .01
+	RETRY_COUNT       = 1
+	RETRY_MAX_BACKOFF = 10 * time.Millisecond
 )
 
 type txParticipant map[int]bool
@@ -104,17 +106,43 @@ func (cli *TxnClient) DoRPC(op *kvs.Op) any {
 					break
 				} else {
 					cli.opsRetried.Add(1)
-					time.Sleep(time.Duration(rand.Float64() * RETRY_MAX_TIME))
+					time.Sleep(time.Duration(rand.Int63n(int64(RETRY_MAX_BACKOFF))))
+					//time.Sleep(time.Duration(rand.Float64() * RETRY_MAX_TIME))
 				}
 			}
 		}
+		/*
+			} else {
+				for i := range cli.Client.Hosts {
+					var tmpResponse = &kvs.Response{}
+					err = cli.Client.GetHost(i).RpcClient.Call(rpcStr, request, tmpResponse)
+					if !response.(kvs.ResponseInterface).IsOk() {
+						response = tmpResponse
+					}
+				}
 
+			}*/
 	} else {
-		for i := range cli.Client.Hosts {
-			var tmpResponse = &kvs.Response{}
-			err = cli.Client.GetHost(i).RpcClient.Call(rpcStr, request, tmpResponse)
-			if !response.(kvs.ResponseInterface).IsOk() {
-				response = tmpResponse
+		switch op.Type {
+		case kvs.BEGIN:
+			for i := range cli.Client.Hosts {
+				var tmpResponse = &kvs.ResponseBatch{}
+				r := request.(*kvs.TxRequest)
+				tmpReq := &kvs.TxRequest{Tx: r.Tx, Lead: false}
+				err = cli.Client.GetHost(i).RpcClient.Call(rpcStr, tmpReq, tmpResponse)
+				if !response.(kvs.ResponseInterface).IsOk() {
+					response = tmpResponse
+				}
+			}
+		case kvs.COMMIT, kvs.ABORT:
+			for i := range cli.Client.Hosts {
+				var tmpResponse = &kvs.Response{}
+				r := request.(*kvs.TxRequest)
+				tmpReq := &kvs.TxRequest{Tx: r.Tx, Lead: i == 0}
+				err = cli.Client.GetHost(i).RpcClient.Call(rpcStr, tmpReq, tmpResponse)
+				if !response.(kvs.ResponseInterface).IsOk() {
+					response = tmpResponse
+				}
 			}
 		}
 
@@ -182,7 +210,12 @@ func (cli *TxnClient) BeginTxnRPC(Tx kvs.TxID) chan kvs.ResponseInterface {
 	return ret
 }
 
-func RunTxnClient(id int, cli TxnClient /*hosts []string,*/, done *atomic.Bool, workload kvs.DefaultWorkload, resultsCh chan<- uint64, retriesCh chan<- uint64) {
+type TripletWorkload interface {
+	NextTriplet() []kvs.Op
+}
+
+func RunTxnClient(id int, cli TxnClient, done *atomic.Bool, workload kvs.DefaultWorkload, resultsCh chan<- uint64, retriesCh chan<- uint64) {
+	//func RunTxnClient(id int, cli TxnClient /*hosts []string,*/, done *atomic.Bool, workload kvs.DefaultWorkload, resultsCh chan<- uint64, retriesCh chan<- uint64) {
 
 	/*cli := TxnClient{}
 	cli.Name = uuid.New().String()
@@ -193,32 +226,80 @@ func RunTxnClient(id int, cli TxnClient /*hosts []string,*/, done *atomic.Bool, 
 		cli.Hosts[i] = Dial(addr)
 	}*/
 	r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(id)*1_000_000_007))
+	/*
+		for !done.Load() {
+			//initialize txn
+			init := <-cli.BeginTxnRPC(kvs.GetNew(cli.GetName() + strconv.FormatInt(int64(id), 10)))
 
-	for !done.Load() {
-		//initialize txn
-		init := <-cli.BeginTxnRPC(kvs.GetNew(cli.GetName() + strconv.FormatInt(int64(id), 10)))
+			if cli.TxID.IsValid() {
+				if !init.IsOk() {
+					<-cli.AbortTxnRPC()
+					continue
+				}
+				res := workload.Next(&cli)
 
-		if cli.TxID.IsValid() {
-			if !init.IsOk() {
-				<-cli.AbortTxnRPC()
-				continue
+				//on failure, abort current txn
+				if !res {
+					<-cli.AbortTxnRPC()
+					time.Sleep(time.Duration(r.Int63n(int64(10 * time.Millisecond))))
+				} else {
+					<-cli.CommitTxnRPC()
+					cli.GetOpsDone().Add(1)
+				}
 			}
-			res := workload.Next(&cli)
 
-			//on failure, abort current txn
-			if !res {
-				<-cli.AbortTxnRPC()
-			} else {
-				<-cli.CommitTxnRPC()
-				cli.GetOpsDone().Add(1)
-			}
+				//jitter := time.Duration(r.Int63n(int64(10 * time.Millisecond)))
+				//if jitter > 0 {
+					//time.Sleep(jitter)
+				//}
 		}
-		jitter := time.Duration(r.Int63n(int64(10 * time.Millisecond)))
-		if jitter > 0 {
-			time.Sleep(jitter)
+	*/
+	for !done.Load() {
+		if tw, ok := workload.(TripletWorkload); ok {
+			triplet := tw.NextTriplet()
+			for {
+				init := <-cli.BeginTxnRPC(kvs.GetNew(cli.GetName() + strconv.FormatInt(int64(id), 10)))
+				if !init.IsOk() || !cli.TxID.IsValid() {
+					<-cli.AbortTxnRPC()
+					continue
+				}
+				allOK := true
+				for _, op := range triplet {
+					if op.IsRead() {
+						if !(<-cli.GetRPC(op.Key)).IsOk() {
+							allOK = false
+							break
+						}
+					} else {
+						if !(<-cli.PutRPC(op.Key, op.Value)).IsOk() {
+							allOK = false
+							break
+						}
+					}
+				}
+				if allOK {
+					<-cli.CommitTxnRPC()
+					cli.GetOpsDone().Add(1)
+					break
+				}
+				<-cli.AbortTxnRPC()
+				time.Sleep(time.Duration(r.Int63n(int64(10 * time.Millisecond))))
+			}
+			continue
+		}
+		init := <-cli.BeginTxnRPC(kvs.GetNew(cli.GetName() + strconv.FormatInt(int64(id), 10)))
+		if !init.IsOk() || !cli.TxID.IsValid() {
+			<-cli.AbortTxnRPC()
+			continue
+		}
+		if workload.Next(&cli) {
+			<-cli.CommitTxnRPC()
+			cli.GetOpsDone().Add(1)
+		} else {
+			<-cli.AbortTxnRPC()
+			time.Sleep(time.Duration(r.Int63n(int64(10 * time.Millisecond))))
 		}
 	}
-
 	fmt.Printf("Client %d finished operations.\n", id)
 	resultsCh <- cli.GetOpsDone().Load()
 	retriesCh <- cli.opsRetried.Load()
